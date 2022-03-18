@@ -21,6 +21,7 @@ import (
 
 	"github.com/intel/cri-resource-manager/pkg/cri/client"
 	"github.com/intel/cri-resource-manager/pkg/cri/server"
+	"github.com/intel/cri-resource-manager/pkg/cri/fpsserver"
 	logger "github.com/intel/cri-resource-manager/pkg/log"
 )
 
@@ -37,6 +38,8 @@ type Options struct {
 	ImageSocket string
 	// RuntimeSocket is the socket path for the (real) CRI runtime services.
 	RuntimeSocket string
+	// FPSSocket is the socket path for the (real) CRI runtime services.
+	FPSSocket string
 	// QualifyReqFn produces context for disambiguating a CRI request/reply.
 	QualifyReqFn func(interface{}) string
 }
@@ -62,6 +65,7 @@ type relay struct {
 	options    Options       // relay options
 	client     client.Client // relay CRI client
 	server     server.Server // relay CRI server
+	fpsserver  fpsserver.Server // FPS server
 }
 
 // NewRelay creates a new relay instance.
@@ -90,6 +94,16 @@ func NewRelay(options Options) (Relay, error) {
 		QualifyReqFn: r.options.QualifyReqFn,
 	}
 	if r.server, err = server.NewServer(srvopts); err != nil {
+		return nil, relayError("failed to create relay server: %v", err)
+	}
+
+	fpssrvopts := fpsserver.Options{
+		Socket:		r.options.RuntimeSocket,
+		User:		-1,
+		Group:		-1,
+		Mode:		0660,
+	}
+	if r.fpsserver, err = fpsserver.NewServer(fpssrvopts); err != nil {
 		return nil, relayError("failed to create relay server: %v", err)
 	}
 
