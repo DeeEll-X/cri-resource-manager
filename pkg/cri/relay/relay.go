@@ -38,7 +38,7 @@ type Options struct {
 	ImageSocket string
 	// RuntimeSocket is the socket path for the (real) CRI runtime services.
 	RuntimeSocket string
-	// FPSSocket is the socket path for the (real) CRI runtime services.
+	// FPSSocket is the socket path for the (real) CRI FPS services.
 	FPSSocket string
 	// QualifyReqFn produces context for disambiguating a CRI request/reply.
 	QualifyReqFn func(interface{}) string
@@ -56,6 +56,8 @@ type Relay interface {
 	Client() client.Client
 	// Server returns the relays server interface.
 	Server() server.Server
+
+	FPSServer() fpsserver.Server
 }
 
 // relay is the implementation of Relay.
@@ -98,7 +100,7 @@ func NewRelay(options Options) (Relay, error) {
 	}
 
 	fpssrvopts := fpsserver.Options{
-		Socket:		r.options.RuntimeSocket,
+		Socket:		r.options.FPSSocket,
 		User:		-1,
 		Group:		-1,
 		Mode:		0660,
@@ -128,12 +130,22 @@ func (r *relay) Setup() error {
 		}
 	}
 
+	if r.options.FPSSocket != DisableService {
+		if err := r.fpsserver.RegisterFPSService(); err != nil {
+			return relayError("failed to register runtime service: %v", err)
+		}
+	}
+
 	return nil
 }
 
 // Start starts the relays request processing goroutine.
 func (r *relay) Start() error {
 	if err := r.server.Start(); err != nil {
+		return relayError("failed to start relay: %v", err)
+	}
+
+	if err := r.fpsserver.Start(); err != nil {
 		return relayError("failed to start relay: %v", err)
 	}
 
@@ -144,6 +156,7 @@ func (r *relay) Start() error {
 func (r *relay) Stop() {
 	r.client.Close()
 	r.server.Stop()
+	r.fpsserver.Stop()
 }
 
 // Client returns the relays Client interface.
@@ -154,6 +167,10 @@ func (r *relay) Client() client.Client {
 // Server returns the relays Server interface.
 func (r *relay) Server() server.Server {
 	return r.server
+}
+
+func (r *relay) FPSServer() fpsserver.Server {
+	return r.fpsserver
 }
 
 func (r *relay) dialNotify(socket string, uid int, gid int, mode os.FileMode, err error) {

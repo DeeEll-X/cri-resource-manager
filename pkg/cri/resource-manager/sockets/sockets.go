@@ -17,6 +17,8 @@ package sockets
 const (
 	// Containerd is the CRI socket containerd listens on.
 	Containerd = "/var/run/containerd/containerd.sock"
+	// FPS is the CRI socket the FPS service listens on.
+	FPS = "/var/run/cri-resmgr/cri-resmgr-fps.sock"
 	// ResourceManagerRelay is the CRI socket the resource manager listens on.
 	ResourceManagerRelay = "/var/run/cri-resmgr/cri-resmgr.sock"
 	// ResourceManagerAgent is the socket the resource manager node agent listens on.
