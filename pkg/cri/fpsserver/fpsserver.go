@@ -56,16 +56,18 @@ type Options struct {
 type Handler grpc.UnaryHandler
 
 // Interceptor is a hook that intercepts processing a request by a handler.
-type Interceptor func(context.Context, string, interface{}, Handler) (interface{}, error)
+type Interceptor func(context.Context, string, interface{}) (interface{}, error)
+
+type FPSDropHandler interface{
+	HandleFPSDrop(string) error
+}
 
 // Server is the interface we expose for controlling our CRI server.
 type Server interface {
-	// RegisterImageService registers the provided image service with the server.
-	RegisterFPSService(FPSServiceServer) error
+	// RegisterFPSService registers the server.
+	RegisterFPSService() error
 	// RegisterInterceptors registers the given interceptors with the server.
-	RegisterInterceptors(map[string]Interceptor) error
-	// SetBypassCheckFn sets a function to check if interception should be bypassed.
-	// SetBypassCheckFn(func() bool)
+	RegisterFPSDropHandler(FPSDropHandler) error
 	// Start starts the request processing loop (goroutine) of the server.
 	Start() error
 	// Stop stops the request processing loop (goroutine) of the server.
@@ -82,9 +84,7 @@ type server struct {
 	listener     net.Listener              // socket our gRPC server listens on
 	server       *grpc.Server              // our gRPC server
 	options      Options                   // server options
-	interceptors map[string]Interceptor    // request intercepting hooks
-	// chkBypassFn  func() bool               // function to check interception bypass
-	fps        	*FPSServiceServer  
+	fpsDropHandler *FPSDropHandler
 	UnimplementedFPSServiceServer
 } 
 
@@ -103,50 +103,32 @@ func NewServer(options Options) (Server, error) {
 	return s, nil
 }
 
-func(s *server) FPSDrop(context.Context, *FPSDropRequest) (*FPSDropReply, error) {
+func(s *server) FPSDrop(cxt context.Context, request *FPSDropRequest) (*FPSDropReply, error) {
+	s.Info("receive FPS drop message from %s", request.Id)
 	reply := FPSDropReply{
 	}
+	(*s.fpsDropHandler).HandleFPSDrop(request.Id)
 	return &reply, nil
 }
 
 
 // RegisterImageService registers an image service with the server.
-func (s *server) RegisterFPSService(service FPSServiceServer) error {
-	if s.fps != nil {
-		return serverError("can't register image service, already registered")
-	}
-
+func (s *server) RegisterFPSService() error {
 	if err := s.createGrpcServer(); err != nil {
 		return err
 	}
 
-	is := service
-	s.fps = &is
 	RegisterFPSServiceServer(s.server, s)
 
 	return nil
 }
 
-// RegisterInterceptors registers the given interveptors with the server.
-func (s *server) RegisterInterceptors(intercept map[string]Interceptor) error {
-	if s.interceptors == nil {
-		s.interceptors = make(map[string]Interceptor)
-	}
-
-	for method, i := range intercept {
-		if _, ok := s.interceptors[method]; ok {
-			return serverError("server already has a registered interceptor for '%s'", method)
-		}
-		s.interceptors[method] = i
-	}
+func (s *server) RegisterFPSDropHandler(handler FPSDropHandler) error {
+	s.fpsDropHandler = &handler
 
 	return nil
 }
 
-// // SetBypassCheckFn sets a function to check if interception should be bypassed.
-// func (s *server) SetBypassCheckFn(fn func() bool) {
-// 	s.chkBypassFn = fn
-// }
 
 // Start starts the servers request processing goroutine.
 func (s *server) Start() error {

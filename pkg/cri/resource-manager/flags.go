@@ -26,6 +26,7 @@ import (
 type options struct {
 	ImageSocket         string
 	RuntimeSocket       string
+	FPSSocket			string
 	RelaySocket         string
 	RelayDir            string
 	AgentSocket         string
@@ -52,6 +53,8 @@ func init() {
 		"Unix domain socket path where CRI image service requests should be relayed to.")
 	flag.StringVar(&opt.RuntimeSocket, "runtime-socket", sockets.Containerd,
 		"Unix domain socket path where CRI runtime service requests should be relayed to.")
+	flag.StringVar(&opt.FPSSocket, "fps-socket", sockets.FPS,
+		"Unix domain socket path where FPS service requests should serve requests on.")
 	flag.StringVar(&opt.RelaySocket, "relay-socket", sockets.ResourceManagerRelay,
 		"Unix domain socket path where the resource manager should serve requests on.")
 	flag.StringVar(&opt.RelayDir, "relay-dir", "/var/lib/cri-resmgr",

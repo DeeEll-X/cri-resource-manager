@@ -465,6 +465,7 @@ func (m *resmgr) setupRelay() error {
 		RelaySocket:   opt.RelaySocket,
 		ImageSocket:   opt.ImageSocket,
 		RuntimeSocket: opt.RuntimeSocket,
+		FPSSocket: 	   opt.FPSSocket,
 		QualifyReqFn:  m.disambiguate,
 	}
 	if m.relay, err = relay.NewRelay(options); err != nil {

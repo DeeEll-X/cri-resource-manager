@@ -50,6 +50,8 @@ func (m *resmgr) setupRequestProcessing() error {
 
 	m.relay.Server().SetBypassCheckFn(m.policy.Bypassed)
 
+	m.relay.FPSServer().RegisterFPSDropHandler(m)
+
 	return nil
 }
 
@@ -891,4 +893,10 @@ func (m *resmgr) sendCRIRequest(ctx context.Context, request interface{}) (inter
 	default:
 		return nil, resmgrError("sendCRIRequest: unhandled request type %T", request)
 	}
+}
+
+func (m *resmgr) HandleFPSDrop(id string) error{
+	m.RebalanceContainers()
+	m.Info("rebalancecontainers returned")
+	return nil
 }
