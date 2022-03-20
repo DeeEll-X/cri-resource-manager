@@ -55,18 +55,16 @@ type Options struct {
 // Handler is a CRI server generic request handler.
 type Handler grpc.UnaryHandler
 
-// Interceptor is a hook that intercepts processing a request by a handler.
-type Interceptor func(context.Context, string, interface{}) (interface{}, error)
-
 type FPSDropHandler interface{
 	HandleFPSDrop(string) error
+	RecordFPSData(string, float32, float32) error
 }
 
 // Server is the interface we expose for controlling our CRI server.
 type Server interface {
 	// RegisterFPSService registers the server.
 	RegisterFPSService() error
-	// RegisterInterceptors registers the given interceptors with the server.
+	// RegisterFPSDropHandler registers the given FPSDropHandler with the server.
 	RegisterFPSDropHandler(FPSDropHandler) error
 	// Start starts the request processing loop (goroutine) of the server.
 	Start() error
@@ -108,6 +106,14 @@ func(s *server) FPSDrop(cxt context.Context, request *FPSDropRequest) (*FPSDropR
 	reply := FPSDropReply{
 	}
 	(*s.fpsDropHandler).HandleFPSDrop(request.Id)
+	return &reply, nil
+}
+
+func(s *server) RecordFPSData(ctx context.Context, request *FPSStatistic) (*FPSStatisticReply, error) {
+	s.Info("receive FPS statistics message, fps %f, running + runnable time %f", request.Fps, request.Rtime)
+	reply := FPSStatisticReply{
+	}
+	(*s.fpsDropHandler).RecordFPSData(request.ContainerId, request.Fps, request.Rtime)
 	return &reply, nil
 }
 

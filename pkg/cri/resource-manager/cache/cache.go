@@ -405,6 +405,11 @@ type Container interface {
 	SetTag(string, string) (string, bool)
 	// DeleteTag deletes the given tag, returning its deleted value.
 	DeleteTag(string) (string, bool)
+
+	// SetFPS sets the value of the latest fps
+	SetFps(float32)
+	// SetRuntime sets the value of the latest running + runnable time
+	SetRtime(float32)
 }
 
 // A cached container.
@@ -441,6 +446,9 @@ type container struct {
 	pending map[string]struct{} // controllers with pending changes for this container
 
 	prettyName string // cached PrettyName()
+
+	Fps			float32						// latest fps
+	Rtime		float32						// latest running + runnable time
 }
 
 // MountType is a propagation type.

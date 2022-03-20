@@ -900,3 +900,21 @@ func (m *resmgr) HandleFPSDrop(id string) error{
 	m.Info("rebalancecontainers returned")
 	return nil
 }
+
+func (m *resmgr) RecordFPSData(containerId string, fps float32, rtime float32) error{
+	m.Lock()
+	defer m.Unlock()
+
+	if container, ok := m.cache.LookupContainer(containerId); ok {
+		if container.GetState() != cache.ContainerStateRunning {
+			m.Error("container %s is not running, fps data is invalid", containerId)
+		} else {
+			container.SetFps(fps)
+			container.SetRtime(rtime)
+		}
+	} else {
+		m.Warn("failed to look up container %s, fail to record fps data",
+			containerId)
+	}
+	return nil
+}

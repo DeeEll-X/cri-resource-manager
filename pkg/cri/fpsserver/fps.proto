@@ -21,6 +21,7 @@ option go_package = "/fpsserver";
 
 service FPSService{
     rpc FPSDrop(FPSDropRequest) returns (FPSDropReply) {}
+    rpc RecordFPSData(FPSStatistic) returns (FPSStatisticReply) {}
 }
 
 message FPSDropRequest {
@@ -28,4 +29,13 @@ message FPSDropRequest {
 }
 
 message FPSDropReply {
+}
+
+message FPSStatistic {
+    string containerId = 1;
+    float fps = 2;
+    float rtime = 3;
+}
+
+message FPSStatisticReply{
 }
