@@ -249,8 +249,21 @@ func (p *podpools) Rebalance() (bool, error) {
 	return false, nil
 }
 
+func (p * podpools) handleFPSDrop(fpsDropPod cache.Pod) (error) {
+	// for _, pool := range p.pools {
+	// 	for podID, _ := range pool.PodIDs {
+	// 		if pod, ok := p.cch.LookupPod(podID); ok {
+				
+	// 		}
+	// 	}
+	// }
+	return nil
+}
 // HandleEvent handles policy-specific events.
-func (p *podpools) HandleEvent(*events.Policy) (bool, error) {
+func (p *podpools) HandleEvent(e *events.Policy) (bool, error) {
+	if (e.Type == events.ContainerFpsDrop){
+		p.handleFPSDrop(e.Data.(cache.Pod))
+	}
 	log.Debug("(not) handling event...")
 	return false, nil
 }

@@ -37,7 +37,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	for i:=0; i < 10; i++ {
-		_, err = c.FPSDrop(ctx, &pb.FPSDropRequest{Id: "12"})
+		_, err = c.SetFPSData(ctx, &pb.FPSStatistic{PodSandboxId: "12", Fps: 50.0, SchedTime: 0.01})
 		if err != nil {
 			log.Fatalf("could not greet: %v", err)
 		}
