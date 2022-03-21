@@ -503,6 +503,14 @@ func (p *pod) getTasks(recursive, processes bool) ([]string, error) {
 	return pids, nil
 }
 
+func (p *pod) SetFPSData(fps float32, schedtime float32) {
+	fpsdata := podFpsData{
+		Fps: fps,
+		Schedtime: schedtime,
+	}
+	p.FpsData = fpsdata
+}
+
 // ParsePodStatus parses a PodSandboxStatusResponse into a PodStatus.
 func ParsePodStatus(response *cri.PodSandboxStatusResponse) (*PodStatus, error) {
 	var name string

@@ -901,20 +901,14 @@ func (m *resmgr) HandleFPSDrop(id string) error{
 	return nil
 }
 
-func (m *resmgr) RecordFPSData(containerId string, fps float32, rtime float32) error{
+func (m *resmgr) RecordFPSData(podSandboxId string, fps float32, schedTime float32) error{
 	m.Lock()
 	defer m.Unlock()
 
-	if container, ok := m.cache.LookupContainer(containerId); ok {
-		if container.GetState() != cache.ContainerStateRunning {
-			m.Error("container %s is not running, fps data is invalid", containerId)
-		} else {
-			container.SetFps(fps)
-			container.SetRtime(rtime)
-		}
+	if pod, ok := m.cache.LookupPod(podSandboxId); ok {
+		pod.SetFPSData(fps, schedTime)
 	} else {
-		m.Warn("failed to look up container %s, fail to record fps data",
-			containerId)
+		m.Warn("failed to look up pod %s, fail to record fps data", podSandboxId)
 	}
 	return nil
 }

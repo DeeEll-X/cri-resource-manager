@@ -973,15 +973,6 @@ func (c *container) DeleteTag(key string) (string, bool) {
 	return value, ok
 }
 
-func (c *container) SetFps(fps float32) {
-	c.Fps = fps
-}
-	// SetRuntime sets the value of the latest running + runnable time
-	
-func (c *container) SetRtime(rtime float32) {
-	c.Rtime = rtime
-}
-
 func (c *container) implicitAffinities() []*Affinity {
 	implicit := []*Affinity{}
 	for name, ia := range c.cache.implicit {

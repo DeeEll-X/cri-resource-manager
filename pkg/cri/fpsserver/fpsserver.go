@@ -110,10 +110,10 @@ func(s *server) FPSDrop(cxt context.Context, request *FPSDropRequest) (*FPSDropR
 }
 
 func(s *server) RecordFPSData(ctx context.Context, request *FPSStatistic) (*FPSStatisticReply, error) {
-	s.Info("receive FPS statistics message, fps %f, running + runnable time %f", request.Fps, request.Rtime)
+	s.Info("receive FPS statistics message, fps %f, schedule time %f", request.Fps, request.SchedTime)
 	reply := FPSStatisticReply{
 	}
-	(*s.fpsDropHandler).RecordFPSData(request.ContainerId, request.Fps, request.Rtime)
+	(*s.fpsDropHandler).RecordFPSData(request.PodSandboxId, request.Fps, request.SchedTime)
 	return &reply, nil
 }
 

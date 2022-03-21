@@ -32,9 +32,9 @@ message FPSDropReply {
 }
 
 message FPSStatistic {
-    string containerId = 1;
+    string podSandboxId = 1;
     float fps = 2;
-    float rtime = 3;
+    float schedTime = 3;
 }
 
 message FPSStatisticReply{
