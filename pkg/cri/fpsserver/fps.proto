@@ -20,22 +20,24 @@ package fpsserver;
 option go_package = "/fpsserver"; 
 
 service FPSService{
-    rpc FPSDrop(FPSDropRequest) returns (FPSDropReply) {}
-    rpc RecordFPSData(FPSStatistic) returns (FPSStatisticReply) {}
-}
-
-message FPSDropRequest {
-    string id = 1;
-}
-
-message FPSDropReply {
+    rpc SetFPSData(FPSStatistic) returns (FPSStatisticReply) {}
+    rpc SetSchedThreshold(SchedThreshold) returns (SchedThresholdReply) {}
 }
 
 message FPSStatistic {
     string podSandboxId = 1;
     float fps = 2;
     float schedTime = 3;
+    bool isFpsDrop = 4;
 }
 
 message FPSStatisticReply{
+}
+
+message SchedThreshold{
+    string podSandboxId = 1;
+    float schedThreshold = 2;
+}
+
+message SchedThresholdReply{
 }

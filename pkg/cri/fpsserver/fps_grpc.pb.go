@@ -18,8 +18,8 @@ const _ = grpc.SupportPackageIsVersion7
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type FPSServiceClient interface {
-	FPSDrop(ctx context.Context, in *FPSDropRequest, opts ...grpc.CallOption) (*FPSDropReply, error)
-	RecordFPSData(ctx context.Context, in *FPSStatistic, opts ...grpc.CallOption) (*FPSStatisticReply, error)
+	SetFPSData(ctx context.Context, in *FPSStatistic, opts ...grpc.CallOption) (*FPSStatisticReply, error)
+	SetSchedThreshold(ctx context.Context, in *SchedThreshold, opts ...grpc.CallOption) (*SchedThresholdReply, error)
 }
 
 type fPSServiceClient struct {
@@ -30,18 +30,18 @@ func NewFPSServiceClient(cc grpc.ClientConnInterface) FPSServiceClient {
 	return &fPSServiceClient{cc}
 }
 
-func (c *fPSServiceClient) FPSDrop(ctx context.Context, in *FPSDropRequest, opts ...grpc.CallOption) (*FPSDropReply, error) {
-	out := new(FPSDropReply)
-	err := c.cc.Invoke(ctx, "/fpsserver.FPSService/FPSDrop", in, out, opts...)
+func (c *fPSServiceClient) SetFPSData(ctx context.Context, in *FPSStatistic, opts ...grpc.CallOption) (*FPSStatisticReply, error) {
+	out := new(FPSStatisticReply)
+	err := c.cc.Invoke(ctx, "/fpsserver.FPSService/SetFPSData", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-func (c *fPSServiceClient) RecordFPSData(ctx context.Context, in *FPSStatistic, opts ...grpc.CallOption) (*FPSStatisticReply, error) {
-	out := new(FPSStatisticReply)
-	err := c.cc.Invoke(ctx, "/fpsserver.FPSService/RecordFPSData", in, out, opts...)
+func (c *fPSServiceClient) SetSchedThreshold(ctx context.Context, in *SchedThreshold, opts ...grpc.CallOption) (*SchedThresholdReply, error) {
+	out := new(SchedThresholdReply)
+	err := c.cc.Invoke(ctx, "/fpsserver.FPSService/SetSchedThreshold", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -52,8 +52,8 @@ func (c *fPSServiceClient) RecordFPSData(ctx context.Context, in *FPSStatistic, 
 // All implementations must embed UnimplementedFPSServiceServer
 // for forward compatibility
 type FPSServiceServer interface {
-	FPSDrop(context.Context, *FPSDropRequest) (*FPSDropReply, error)
-	RecordFPSData(context.Context, *FPSStatistic) (*FPSStatisticReply, error)
+	SetFPSData(context.Context, *FPSStatistic) (*FPSStatisticReply, error)
+	SetSchedThreshold(context.Context, *SchedThreshold) (*SchedThresholdReply, error)
 	mustEmbedUnimplementedFPSServiceServer()
 }
 
@@ -61,11 +61,11 @@ type FPSServiceServer interface {
 type UnimplementedFPSServiceServer struct {
 }
 
-func (UnimplementedFPSServiceServer) FPSDrop(context.Context, *FPSDropRequest) (*FPSDropReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method FPSDrop not implemented")
+func (UnimplementedFPSServiceServer) SetFPSData(context.Context, *FPSStatistic) (*FPSStatisticReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetFPSData not implemented")
 }
-func (UnimplementedFPSServiceServer) RecordFPSData(context.Context, *FPSStatistic) (*FPSStatisticReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method RecordFPSData not implemented")
+func (UnimplementedFPSServiceServer) SetSchedThreshold(context.Context, *SchedThreshold) (*SchedThresholdReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method SetSchedThreshold not implemented")
 }
 func (UnimplementedFPSServiceServer) mustEmbedUnimplementedFPSServiceServer() {}
 
@@ -80,38 +80,38 @@ func RegisterFPSServiceServer(s grpc.ServiceRegistrar, srv FPSServiceServer) {
 	s.RegisterService(&FPSService_ServiceDesc, srv)
 }
 
-func _FPSService_FPSDrop_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(FPSDropRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(FPSServiceServer).FPSDrop(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/fpsserver.FPSService/FPSDrop",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FPSServiceServer).FPSDrop(ctx, req.(*FPSDropRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _FPSService_RecordFPSData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+func _FPSService_SetFPSData_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(FPSStatistic)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(FPSServiceServer).RecordFPSData(ctx, in)
+		return srv.(FPSServiceServer).SetFPSData(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/fpsserver.FPSService/RecordFPSData",
+		FullMethod: "/fpsserver.FPSService/SetFPSData",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FPSServiceServer).RecordFPSData(ctx, req.(*FPSStatistic))
+		return srv.(FPSServiceServer).SetFPSData(ctx, req.(*FPSStatistic))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _FPSService_SetSchedThreshold_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SchedThreshold)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(FPSServiceServer).SetSchedThreshold(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: "/fpsserver.FPSService/SetSchedThreshold",
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(FPSServiceServer).SetSchedThreshold(ctx, req.(*SchedThreshold))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -124,12 +124,12 @@ var FPSService_ServiceDesc = grpc.ServiceDesc{
 	HandlerType: (*FPSServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "FPSDrop",
-			Handler:    _FPSService_FPSDrop_Handler,
+			MethodName: "SetFPSData",
+			Handler:    _FPSService_SetFPSData_Handler,
 		},
 		{
-			MethodName: "RecordFPSData",
-			Handler:    _FPSService_RecordFPSData_Handler,
+			MethodName: "SetSchedThreshold",
+			Handler:    _FPSService_SetSchedThreshold_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

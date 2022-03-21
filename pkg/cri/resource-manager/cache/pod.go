@@ -504,11 +504,12 @@ func (p *pod) getTasks(recursive, processes bool) ([]string, error) {
 }
 
 func (p *pod) SetFPSData(fps float32, schedtime float32) {
-	fpsdata := podFpsData{
-		Fps: fps,
-		Schedtime: schedtime,
-	}
-	p.FpsData = fpsdata
+	p.FpsData.Fps = fps
+	p.FpsData.Schedtime = schedtime
+}
+
+func (p *pod) SetSchedThreshold(schedThreshold float32) {
+	p.FpsData.SchedThreshold = schedThreshold
 }
 
 // ParsePodStatus parses a PodSandboxStatusResponse into a PodStatus.

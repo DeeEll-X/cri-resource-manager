@@ -172,14 +172,17 @@ type Pod interface {
 	// processes, if called with false, or including those if called with true.
 	GetTasks(bool) ([]string, error)
 	
-	// setFpsData set the fps data of a pod
+	// SetFpsData set the fps data of a pod
 	SetFPSData(float32, float32)
+	// SetSchedThreshold set the game schedule time threshold
+	SetSchedThreshold(float32)
 }
 
 // pod fps data
 type podFpsData struct {
 	Fps				float32						// latest fps
-	Schedtime		float32						// latest running + runnable time
+	Schedtime		float32						// latest schedule time
+	SchedThreshold	float32						// the game schedule threshold
 }
 
 // A cached pod.

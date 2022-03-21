@@ -58,6 +58,7 @@ type Handler grpc.UnaryHandler
 type FPSDropHandler interface{
 	HandleFPSDrop(string) error
 	RecordFPSData(string, float32, float32) error
+	SetSchedThreshold(string, float32) error
 }
 
 // Server is the interface we expose for controlling our CRI server.
@@ -101,19 +102,22 @@ func NewServer(options Options) (Server, error) {
 	return s, nil
 }
 
-func(s *server) FPSDrop(cxt context.Context, request *FPSDropRequest) (*FPSDropReply, error) {
-	s.Info("receive FPS drop message from %s", request.Id)
-	reply := FPSDropReply{
-	}
-	(*s.fpsDropHandler).HandleFPSDrop(request.Id)
-	return &reply, nil
-}
-
 func(s *server) RecordFPSData(ctx context.Context, request *FPSStatistic) (*FPSStatisticReply, error) {
 	s.Info("receive FPS statistics message, fps %f, schedule time %f", request.Fps, request.SchedTime)
 	reply := FPSStatisticReply{
 	}
 	(*s.fpsDropHandler).RecordFPSData(request.PodSandboxId, request.Fps, request.SchedTime)
+	if request.IsFpsDrop {
+		s.Info("podSandbox %s fps drop", request.PodSandboxId)
+		(*s.fpsDropHandler).HandleFPSDrop(request.PodSandboxId)
+	}
+	return &reply, nil
+}
+
+func(s *server) SetSchedThreshold(ctx context.Context, request *SchedThreshold) (*SchedThresholdReply, error) {
+	s.Info("receive Schedule threshold message, threshold %f", request.SchedThreshold);
+	reply := SchedThresholdReply{}
+	(*s.fpsDropHandler).SetSchedThreshold(request.PodSandboxId ,request.SchedThreshold)
 	return &reply, nil
 }
 

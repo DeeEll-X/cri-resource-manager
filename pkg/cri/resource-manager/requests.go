@@ -912,3 +912,15 @@ func (m *resmgr) RecordFPSData(podSandboxId string, fps float32, schedTime float
 	}
 	return nil
 }
+
+func (m* resmgr) SetSchedThreshold(podSandboxId string, schedThreshold float32) error{
+	m.Lock()
+	defer m.Unlock()
+
+	if pod, ok := m.cache.LookupPod(podSandboxId); ok {
+		pod.SetSchedThreshold(schedThreshold)
+	} else {
+		m.Warn("failed to look up pod %s, fail to record fps data", podSandboxId)
+	}
+	return nil
+}
