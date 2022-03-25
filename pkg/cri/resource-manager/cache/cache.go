@@ -176,6 +176,8 @@ type Pod interface {
 	SetFPSData(float32, float32)
 	// SetSchedThreshold set the game schedule time threshold
 	SetSchedThreshold(float32)
+	// GetFPSData returns the game fps related data
+	GetFPSData() podFpsData
 }
 
 // pod fps data
@@ -183,6 +185,7 @@ type podFpsData struct {
 	Fps				float32						// latest fps
 	Schedtime		float32						// latest schedule time
 	SchedThreshold	float32						// the game schedule threshold
+	Interfere		float32						// interfere 
 }
 
 // A cached pod.

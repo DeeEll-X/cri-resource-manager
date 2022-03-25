@@ -66,12 +66,14 @@ const (
 	FillBalanced FillOrder = iota
 	FillPacked
 	FillFirstFree
+	FillRebalance
 )
 
 var fillOrderNames = map[FillOrder]string{
 	FillBalanced:  "Balanced",
 	FillPacked:    "Packed",
 	FillFirstFree: "FirstFree",
+	FillRebalance: "FillRebalance",
 }
 
 // String stringifies a FillOrder

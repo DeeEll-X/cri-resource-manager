@@ -19,7 +19,6 @@ const _ = grpc.SupportPackageIsVersion7
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type FPSServiceClient interface {
 	SetFPSData(ctx context.Context, in *FPSStatistic, opts ...grpc.CallOption) (*FPSStatisticReply, error)
-	SetSchedThreshold(ctx context.Context, in *SchedThreshold, opts ...grpc.CallOption) (*SchedThresholdReply, error)
 }
 
 type fPSServiceClient struct {
@@ -39,21 +38,11 @@ func (c *fPSServiceClient) SetFPSData(ctx context.Context, in *FPSStatistic, opt
 	return out, nil
 }
 
-func (c *fPSServiceClient) SetSchedThreshold(ctx context.Context, in *SchedThreshold, opts ...grpc.CallOption) (*SchedThresholdReply, error) {
-	out := new(SchedThresholdReply)
-	err := c.cc.Invoke(ctx, "/fpsserver.FPSService/SetSchedThreshold", in, out, opts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // FPSServiceServer is the server API for FPSService service.
 // All implementations must embed UnimplementedFPSServiceServer
 // for forward compatibility
 type FPSServiceServer interface {
 	SetFPSData(context.Context, *FPSStatistic) (*FPSStatisticReply, error)
-	SetSchedThreshold(context.Context, *SchedThreshold) (*SchedThresholdReply, error)
 	mustEmbedUnimplementedFPSServiceServer()
 }
 
@@ -63,9 +52,6 @@ type UnimplementedFPSServiceServer struct {
 
 func (UnimplementedFPSServiceServer) SetFPSData(context.Context, *FPSStatistic) (*FPSStatisticReply, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method SetFPSData not implemented")
-}
-func (UnimplementedFPSServiceServer) SetSchedThreshold(context.Context, *SchedThreshold) (*SchedThresholdReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method SetSchedThreshold not implemented")
 }
 func (UnimplementedFPSServiceServer) mustEmbedUnimplementedFPSServiceServer() {}
 
@@ -98,24 +84,6 @@ func _FPSService_SetFPSData_Handler(srv interface{}, ctx context.Context, dec fu
 	return interceptor(ctx, in, info, handler)
 }
 
-func _FPSService_SetSchedThreshold_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SchedThreshold)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(FPSServiceServer).SetSchedThreshold(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: "/fpsserver.FPSService/SetSchedThreshold",
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(FPSServiceServer).SetSchedThreshold(ctx, req.(*SchedThreshold))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 // FPSService_ServiceDesc is the grpc.ServiceDesc for FPSService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -126,10 +94,6 @@ var FPSService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "SetFPSData",
 			Handler:    _FPSService_SetFPSData_Handler,
-		},
-		{
-			MethodName: "SetSchedThreshold",
-			Handler:    _FPSService_SetSchedThreshold_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},

@@ -58,7 +58,6 @@ type Handler grpc.UnaryHandler
 type FPSDropHandler interface{
 	HandleFPSDrop(string) error
 	RecordFPSData(string, float32, float32) error
-	SetSchedThreshold(string, float32) error
 }
 
 // Server is the interface we expose for controlling our CRI server.
@@ -111,13 +110,6 @@ func(s *server) RecordFPSData(ctx context.Context, request *FPSStatistic) (*FPSS
 		s.Info("podSandbox %s fps drop", request.PodSandboxId)
 		(*s.fpsDropHandler).HandleFPSDrop(request.PodSandboxId)
 	}
-	return &reply, nil
-}
-
-func(s *server) SetSchedThreshold(ctx context.Context, request *SchedThreshold) (*SchedThresholdReply, error) {
-	s.Info("receive Schedule threshold message, threshold %f", request.SchedThreshold);
-	reply := SchedThresholdReply{}
-	(*s.fpsDropHandler).SetSchedThreshold(request.PodSandboxId ,request.SchedThreshold)
 	return &reply, nil
 }
 

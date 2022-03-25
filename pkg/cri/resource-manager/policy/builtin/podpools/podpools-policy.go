@@ -88,7 +88,11 @@ type Pool struct {
 	// - len(PodIDs[podID]) is the number of containers of podID
 	//   currently assigned to the pool.
 	// - Def.MaxPods - len(PodIDs) is free pod capacity.
-	PodIDs map[string][]string
+	PodIDs      map[string][]string
+	HeavyPodIDs []string
+	LightPodIDs []string
+	isHeavyFull bool
+	isFull      bool
 }
 
 var log logger.Logger = logger.NewLogger("policy")
@@ -249,19 +253,56 @@ func (p *podpools) Rebalance() (bool, error) {
 	return false, nil
 }
 
-func (p * podpools) handleFPSDrop(fpsDropPod cache.Pod) (error) {
-	// for _, pool := range p.pools {
-	// 	for podID, _ := range pool.PodIDs {
-	// 		if pod, ok := p.cch.LookupPod(podID); ok {
-				
-	// 		}
-	// 	}
-	// }
+func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
+	curPool := p.allocatedPool(fpsDropPod)
+
+	var podToMov cache.Pod
+	if value, ok := fpsDropPod.GetAnnotation("weight"); ok {
+		if value == "heavy" {
+			if len(curPool.LightPodIDs) > 0 {
+				// if exists light game, move light one; mark cur pool isfull
+				podToMov, _ = p.cch.LookupPod(curPool.LightPodIDs[0])
+				curPool.LightPodIDs = curPool.LightPodIDs[1:]
+				curPool.isFull = true
+			} else {
+				//  else move this game; mark current pool isheavyfull
+				podToMov = fpsDropPod
+				curPool.isHeavyFull = true
+				for ind,id := range curPool.HeavyPodIDs {
+					if id == podToMov.GetID() {
+						length := len(curPool.HeavyPodIDs)
+						curPool.HeavyPodIDs[ind] = curPool.HeavyPodIDs[length-1]
+						curPool.HeavyPodIDs = curPool.HeavyPodIDs[:length-1]
+					}
+				}
+			}
+		} else if value == "light" {
+			// move this game; mark current pool is full; 
+			podToMov = fpsDropPod
+			curPool.isFull = true
+			// remove the pod in curpool.LightPodIDs
+			for ind,id := range curPool.LightPodIDs{
+				if id == podToMov.GetID() {
+					length := len(curPool.LightPodIDs)
+					curPool.LightPodIDs[ind] = curPool.LightPodIDs[length-1]
+					curPool.LightPodIDs = curPool.LightPodIDs[:length-1]
+				}
+			}
+		}
+
+		// remove the pod from the pool
+		p.freePool(podToMov, curPool)
+		// allocate all the containers and the pod
+		for _,c := range podToMov.GetContainers() {
+			p.AllocateResources(c)
+		}
+	}
 	return nil
 }
+
 // HandleEvent handles policy-specific events.
 func (p *podpools) HandleEvent(e *events.Policy) (bool, error) {
-	if (e.Type == events.ContainerFpsDrop){
+	if e.Type == events.ContainerFpsDrop {
 		p.handleFPSDrop(e.Data.(cache.Pod))
 	}
 	log.Debug("(not) handling event...")
@@ -316,6 +357,83 @@ func (p *podpools) allocatePool(pod cache.Pod) *Pool {
 		})
 	case FillFirstFree:
 		// FirstFree is already the first of the pools list.
+	case FillRebalance:
+		if value, ok := pod.GetAnnotation("weight"); ok {
+			isPoolfound := false
+			if value == "heavy" { 
+				// find pools not heavyfull and only for heavy games
+				for id, pool := range pools {
+					if !pool.isHeavyFull && !pool.isFull && len(pool.LightPodIDs) == 0 {
+						pools[0], pools[id] = pools[id], pools[0]
+						isPoolfound = true
+						break
+					}
+				}
+				// find pools not full and not heavyfull
+				if !isPoolfound {
+					for id, pool := range pools {
+						if !pool.isFull && !pool.isHeavyFull{
+							pools[0], pools[id] = pools[id], pools[0]
+							isPoolfound = true
+							break
+						}
+					}
+				}
+				// find pools full and not heavyfull
+				if !isPoolfound {
+					for id, pool := range pools {
+						if pool.isFull && !pool.isHeavyFull {
+							pools[0], pools[id] = pools[id], pools[0]
+							isPoolfound = true
+							break
+						}
+					}
+				}
+				if !isPoolfound{
+					log.Error("cannot find free %q pool for pod %q",poolDef.Name, pod.GetName())
+				}
+
+			} else if value == "light" {
+				// find isheavyfull && !isfull pool first
+				for id, pool := range pools {
+					if pool.isHeavyFull && !pool.isFull {
+						pools[0], pools[id] = pools[id], pools[0]
+						isPoolfound = true
+						break
+					}
+				}
+				// find pools for only light games with the most light games
+				if !isPoolfound {
+					maxLightPodNum := 0
+					var maxLightPodind int
+					for id, pool := range pools {
+						if !pool.isFull && len(pool.LightPodIDs) >= 0 && len(pool.HeavyPodIDs) == 0{
+							isPoolfound = true
+							if len(pool.LightPodIDs) > maxLightPodNum{
+								maxLightPodind = id
+								maxLightPodNum = len(pool.LightPodIDs)
+							}
+							break
+						}
+					}
+					if isPoolfound {
+						pools[0], pools[maxLightPodind] = pools[maxLightPodind], pools[0]
+					}
+				}
+				// find any pool !isfull to insert 
+				if !isPoolfound {
+					for id, pool := range pools {
+						if !pool.isFull {
+							pools[0], pools[id] = pools[id], pools[0]
+							isPoolfound = true
+						}
+					}
+				}
+				if !isPoolfound {
+					log.Error("cannot find free %q pool for pod %q",poolDef.Name, pod.GetName())
+				}
+			}
+		}
 	}
 	if len(pools) == 0 {
 		log.Error("cannot find free %q pool for pod %q, falling back to %q", poolDef.Name, pod.GetName(), defaultPoolDefName)

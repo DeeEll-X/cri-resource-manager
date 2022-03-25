@@ -21,7 +21,6 @@ option go_package = "/fpsserver";
 
 service FPSService{
     rpc SetFPSData(FPSStatistic) returns (FPSStatisticReply) {}
-    rpc SetSchedThreshold(SchedThreshold) returns (SchedThresholdReply) {}
 }
 
 message FPSStatistic {
@@ -32,12 +31,4 @@ message FPSStatistic {
 }
 
 message FPSStatisticReply{
-}
-
-message SchedThreshold{
-    string podSandboxId = 1;
-    float schedThreshold = 2;
-}
-
-message SchedThresholdReply{
 }

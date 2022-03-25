@@ -512,6 +512,10 @@ func (p *pod) SetSchedThreshold(schedThreshold float32) {
 	p.FpsData.SchedThreshold = schedThreshold
 }
 
+func (p *pod) GetFPSData() podFpsData {
+	return p.FpsData
+}
+
 // ParsePodStatus parses a PodSandboxStatusResponse into a PodStatus.
 func ParsePodStatus(response *cri.PodSandboxStatusResponse) (*PodStatus, error) {
 	var name string
