@@ -483,6 +483,33 @@ func (p *podpools) freePool(pod cache.Pod, pool *Pool) {
 	podID := pod.GetID()
 	delete(pool.PodIDs, podID)
 	delete(p.podMaxMilliCPU, podID)
+	if pool.Def.FillOrder == FillRebalance {
+		if value, ok := pod.GetAnnotation("weight"); ok{
+			if value == "heavy"{
+				for ind,id := range pool.HeavyPodIDs {
+					if id == podID {
+						length := len(pool.HeavyPodIDs)
+						pool.HeavyPodIDs[ind] = pool.HeavyPodIDs[length-1]
+						pool.HeavyPodIDs = pool.HeavyPodIDs[:length-1]
+					}
+				}
+				if pool.isHeavyFull {
+					pool.isHeavyFull = false
+				}
+			} else if value == "light" {
+				for ind,id := range pool.LightPodIDs {
+					if id == podID {
+						length := len(pool.LightPodIDs)
+						pool.LightPodIDs[ind] = pool.LightPodIDs[length-1]
+						pool.LightPodIDs = pool.LightPodIDs[:length-1]
+					}
+				}
+			}
+			if pool.isFull {
+				pool.isFull = false
+			}
+		}
+	}
 }
 
 // trackPodCPU keeps track on pod's CPU requests.
