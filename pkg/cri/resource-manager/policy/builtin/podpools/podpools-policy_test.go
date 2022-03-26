@@ -16,12 +16,19 @@ package podpools
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 
+	cri "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 
 	"github.com/intel/cri-resource-manager/pkg/cpuallocator"
+	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/cache"
+	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/policy"
+	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/events"
+
 )
 
 func validateError(t *testing.T, expectedError string, err error) bool {
@@ -577,4 +584,127 @@ func TestParseInstancesCPUs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func createPodAndContainer(cch cache.Cache, id string, weight string, poolDefName string) (cache.Pod,cache.Container)  {
+	runPodSandboxRequest := cri.RunPodSandboxRequest{
+		Config: &cri.PodSandboxConfig{
+			Metadata: &cri.PodSandboxMetadata{ 
+				Name: "pod"+id,
+				Uid: id,
+			},
+			Annotations: map[string]string{"weight":weight, podpoolKey+"/pod":poolDefName},
+		},
+	}
+	pod := cch.InsertPod(id, &runPodSandboxRequest , nil)
+	createContainerRequest := cri.CreateContainerRequest{
+		PodSandboxId: id,
+		Config: &cri.ContainerConfig{
+			Metadata: &cri.ContainerMetadata{
+				Name: "container"+id,
+			},
+		},
+		SandboxConfig: &cri.PodSandboxConfig{
+			Metadata: &cri.PodSandboxMetadata{
+				Name: "pod" + id,
+				Uid: id,
+			},
+		},
+	}
+	container, _ := cch.InsertContainer(&createContainerRequest)
+	return pod, container
+}
+func TestFillRebalance(t *testing.T) {
+	reservedCpus1 := cpuset.CPUSet{}
+	reservedPoolDef := PoolDef{
+		Name: reservedPoolDefName,
+	}
+	defaultPoolDef := PoolDef{
+		Name: defaultPoolDefName,
+	}
+	// reservedPool := Pool{
+	// 	Def:  &reservedPoolDef,
+	// 	CPUs: reservedCpus1,
+	// }
+	// defaultPool := Pool{
+	// 	Def:  &defaultPoolDef,
+	// 	CPUs: reservedCpus1,
+	// }
+	poolDef := PoolDef{
+		Name:      "dualcpu",
+		CPU:       "2",
+		Instances: "6 CPUs",
+		FillOrder: FillRebalance,
+	}
+	podpoolsOptions := PodpoolsOptions {
+		PinCPU: true,
+		PinMemory: true,
+		PoolDefs: []*PoolDef{&poolDef},
+	}
+
+	cacheDir, _ := ioutil.TempDir("", "")
+	defer os.RemoveAll(cacheDir)
+	cch,_ := cache.NewCache(cache.Options{ CacheDir: cacheDir})
+
+
+	p := &podpools{
+		options: &policy.BackendOptions{
+			System: &mockSystem{},
+		},
+		cch: cch,
+		cpuAllocator: &mockCpuAllocator{},
+		allowed: cpuset.NewCPUSet(0,1,2,3,4,5),
+		reserved: reservedCpus1,
+		reservedPoolDef: &reservedPoolDef,
+		defaultPoolDef: &defaultPoolDef,
+		podMaxMilliCPU: make(map[string]int64),
+	}
+	p.setConfig(&podpoolsOptions)
+
+	// 1 pool = at most 2 heavy + 2 light = at most 6 light 
+	// in pool 0 = 2 heavy
+	heavyPod1,heavyContainer1:= createPodAndContainer(cch, "h1", "heavy", "dualcpu")
+	p.AllocateResources(heavyContainer1)
+	_,heavyContainer2 := createPodAndContainer(cch, "h2", "heavy", "dualcpu")
+	p.AllocateResources(heavyContainer2)
+
+	// in pool 1 = 2 light
+	_,lightContainer1 := createPodAndContainer(cch,"l1","light","dualcpu")
+	p.AllocateResources(lightContainer1)
+	_,lightContainer2 := createPodAndContainer(cch, "l2", "light", "dualcpu")
+	p.AllocateResources(lightContainer2)
+	 
+	// insert to pool 0, but rebalance to pool 2
+	// pool 2 = 1 heavy
+	heavyPod3 ,heavyContainer3 := createPodAndContainer(cch, "h3", "heavy", "dualcpu")
+	p.AllocateResources(heavyContainer3)
+	e1 := &events.Policy{
+		Type:   events.ContainerFpsDrop,
+		Source: "podpools-policy_test",
+		Data:   heavyPod3,
+	}
+	p.HandleEvent(e1);
+
+	// insert to pool 0
+	// pool0 = 2 heavy + 2 light
+	_,lightContainer3 := createPodAndContainer(cch, "l3", "light", "dualcpu")
+	p.AllocateResources(lightContainer3)
+	_,lightContainer4 := createPodAndContainer(cch, "l4", "light", "dualcpu")
+	p.AllocateResources(lightContainer4)
+
+	// insert to pool 0, but schedule to pool 1
+	// pool 0  isfull && isheavyfull
+	_,lightContainer5 := createPodAndContainer(cch, "l5", "light", "dualcpu")
+	p.AllocateResources(lightContainer5)
+	e2 := &events.Policy{
+		Type:   events.ContainerFpsDrop,
+		Source: "podpools-policy_test",
+		Data:   heavyPod1,
+	}
+	p.HandleEvent(e2);
+
+	// insert to pool 
+	_,heavyContainer4 := createPodAndContainer(cch, "h4", "heavy", "dualcpu")
+	p.AllocateResources(heavyContainer4)
+	
 }

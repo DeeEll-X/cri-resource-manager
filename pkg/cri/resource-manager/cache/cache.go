@@ -177,11 +177,11 @@ type Pod interface {
 	// SetSchedThreshold set the game schedule time threshold
 	SetSchedThreshold(float32)
 	// GetFPSData returns the game fps related data
-	GetFPSData() podFpsData
+	GetFPSData() PodFpsData
 }
 
 // pod fps data
-type podFpsData struct {
+type PodFpsData struct {
 	Fps				float32						// latest fps
 	Schedtime		float32						// latest schedule time
 	SchedThreshold	float32						// the game schedule threshold
@@ -205,7 +205,7 @@ type pod struct {
 	Resources *PodResourceRequirements // annotated resource requirements
 	Affinity  *podContainerAffinity    // annotated container affinity
 
-	FpsData		podFpsData
+	FpsData		PodFpsData
 }
 
 // ContainerState is the container state in the runtime.

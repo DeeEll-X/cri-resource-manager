@@ -512,7 +512,7 @@ func (p *pod) SetSchedThreshold(schedThreshold float32) {
 	p.FpsData.SchedThreshold = schedThreshold
 }
 
-func (p *pod) GetFPSData() podFpsData {
+func (p *pod) GetFPSData() PodFpsData {
 	return p.FpsData
 }
 
