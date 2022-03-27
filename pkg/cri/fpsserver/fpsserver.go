@@ -57,7 +57,7 @@ type Handler grpc.UnaryHandler
 
 type FPSDropHandler interface{
 	HandleFPSDrop(string) error
-	RecordFPSData(string, float32, float32) error
+	RecordFPSData(string, float64, float64) error
 }
 
 // Server is the interface we expose for controlling our CRI server.

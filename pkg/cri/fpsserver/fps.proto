@@ -25,8 +25,8 @@ service FPSService{
 
 message FPSStatistic {
     string podSandboxId = 1;
-    float fps = 2;
-    float schedTime = 3;
+    double fps = 2;
+    double schedTime = 3;
     bool isFpsDrop = 4;
 }
 

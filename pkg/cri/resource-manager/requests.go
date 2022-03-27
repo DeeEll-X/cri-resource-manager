@@ -915,7 +915,7 @@ func (m *resmgr) HandleFPSDrop(podSandboxId string) error{
 	return nil
 }
 
-func (m *resmgr) RecordFPSData(podSandboxId string, fps float32, schedTime float32) error{
+func (m *resmgr) RecordFPSData(podSandboxId string, fps float64, schedTime float64) error{
 	m.Lock()
 	defer m.Unlock()
 

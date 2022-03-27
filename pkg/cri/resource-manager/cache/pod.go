@@ -503,13 +503,9 @@ func (p *pod) getTasks(recursive, processes bool) ([]string, error) {
 	return pids, nil
 }
 
-func (p *pod) SetFPSData(fps float32, schedtime float32) {
+func (p *pod) SetFPSData(fps float64, schedtime float64) {
 	p.FpsData.Fps = fps
 	p.FpsData.Schedtime = schedtime
-}
-
-func (p *pod) SetSchedThreshold(schedThreshold float32) {
-	p.FpsData.SchedThreshold = schedThreshold
 }
 
 func (p *pod) GetFPSData() PodFpsData {

@@ -586,14 +586,19 @@ func TestParseInstancesCPUs(t *testing.T) {
 	}
 }
 
-func createPodAndContainer(cch cache.Cache, id string, weight string, poolDefName string) (cache.Pod,cache.Container)  {
+func createPodAndContainer(cch cache.Cache, id string, weight string, poolDefName string, 
+		gameName string, threshold string) (cache.Pod,cache.Container)  {
 	runPodSandboxRequest := cri.RunPodSandboxRequest{
 		Config: &cri.PodSandboxConfig{
 			Metadata: &cri.PodSandboxMetadata{ 
 				Name: "pod"+id,
 				Uid: id,
 			},
-			Annotations: map[string]string{"weight":weight, podpoolKey+"/pod":poolDefName},
+			Annotations: map[string]string{
+					"weight":weight,
+			 		podpoolKey+"/pod":poolDefName, 
+					"gameName": gameName,
+					"threshold": threshold},
 		},
 	}
 	pod := cch.InsertPod(id, &runPodSandboxRequest , nil)
@@ -615,6 +620,8 @@ func createPodAndContainer(cch cache.Cache, id string, weight string, poolDefNam
 	return pod, container
 }
 func TestFillRebalance(t *testing.T) {
+	log.EnableDebug(true)
+	
 	reservedCpus1 := cpuset.CPUSet{}
 	reservedPoolDef := PoolDef{
 		Name: reservedPoolDefName,
@@ -622,14 +629,6 @@ func TestFillRebalance(t *testing.T) {
 	defaultPoolDef := PoolDef{
 		Name: defaultPoolDefName,
 	}
-	// reservedPool := Pool{
-	// 	Def:  &reservedPoolDef,
-	// 	CPUs: reservedCpus1,
-	// }
-	// defaultPool := Pool{
-	// 	Def:  &defaultPoolDef,
-	// 	CPUs: reservedCpus1,
-	// }
 	poolDef := PoolDef{
 		Name:      "dualcpu",
 		CPU:       "2",
@@ -658,25 +657,39 @@ func TestFillRebalance(t *testing.T) {
 		reservedPoolDef: &reservedPoolDef,
 		defaultPoolDef: &defaultPoolDef,
 		podMaxMilliCPU: make(map[string]int64),
+		gameThreshold: make(map[string]float64),
+		interferes: gameInterfere{
+			heavyToHeavy: 3,
+			heavyToLight: 2,
+			lightToHeavy: 1,
+			lightToLight: 1,
+		},
+		clock: &mockClock{},
 	}
 	p.setConfig(&podpoolsOptions)
 
-	// 1 pool = at most 2 heavy + 2 light = at most 6 light 
+	// 1 pool = at most 2 heavy(15+3+1+1) + 2 light(15+2+2+1) = at most 6 light 
 	// in pool 0 = 2 heavy
-	heavyPod1,heavyContainer1:= createPodAndContainer(cch, "h1", "heavy", "dualcpu")
+	heavyPod1,heavyContainer1:= createPodAndContainer(cch, "h1", "heavy", "dualcpu", "A", "20.5")
 	p.AllocateResources(heavyContainer1)
-	_,heavyContainer2 := createPodAndContainer(cch, "h2", "heavy", "dualcpu")
+	heavyPod2,heavyContainer2 := createPodAndContainer(cch, "h2", "heavy", "dualcpu", "A","20.5")
 	p.AllocateResources(heavyContainer2)
 
+	heavyPod1.SetFPSData(60, 18)
+	heavyPod2.SetFPSData(60, 18)
+
 	// in pool 1 = 2 light
-	_,lightContainer1 := createPodAndContainer(cch,"l1","light","dualcpu")
+	lightPod1,lightContainer1 := createPodAndContainer(cch,"l1","light","dualcpu","B","20.5")
 	p.AllocateResources(lightContainer1)
-	_,lightContainer2 := createPodAndContainer(cch, "l2", "light", "dualcpu")
+	lightPod2,lightContainer2 := createPodAndContainer(cch, "l2", "light", "dualcpu","B","20.5")
 	p.AllocateResources(lightContainer2)
 	 
+	lightPod1.SetFPSData(60, 16)
+	lightPod2.SetFPSData(60, 16)
+
 	// insert to pool 0, but rebalance to pool 2
 	// pool 2 = 1 heavy
-	heavyPod3 ,heavyContainer3 := createPodAndContainer(cch, "h3", "heavy", "dualcpu")
+	heavyPod3 ,heavyContainer3 := createPodAndContainer(cch, "h3", "heavy", "dualcpu","A","20.5")
 	p.AllocateResources(heavyContainer3)
 	e1 := &events.Policy{
 		Type:   events.ContainerFpsDrop,
@@ -685,26 +698,47 @@ func TestFillRebalance(t *testing.T) {
 	}
 	p.HandleEvent(e1);
 
-	// insert to pool 0
-	// pool0 = 2 heavy + 2 light
-	_,lightContainer3 := createPodAndContainer(cch, "l3", "light", "dualcpu")
+	// insert to pool 1
+	// pool1 = 6 light
+	lightPod3,lightContainer3 := createPodAndContainer(cch, "l3", "light", "dualcpu", "B","20.5")
 	p.AllocateResources(lightContainer3)
-	_,lightContainer4 := createPodAndContainer(cch, "l4", "light", "dualcpu")
+	lightPod4,lightContainer4 := createPodAndContainer(cch, "l4", "light", "dualcpu","B","20.5")
 	p.AllocateResources(lightContainer4)
-
-	// insert to pool 0, but schedule to pool 1
-	// pool 0  isfull && isheavyfull
-	_,lightContainer5 := createPodAndContainer(cch, "l5", "light", "dualcpu")
+	lightPod5,lightContainer5 := createPodAndContainer(cch, "l5", "light", "dualcpu","B","20.5")
 	p.AllocateResources(lightContainer5)
-	e2 := &events.Policy{
-		Type:   events.ContainerFpsDrop,
-		Source: "podpools-policy_test",
-		Data:   heavyPod1,
-	}
-	p.HandleEvent(e2);
+	lightPod6,lightContainer6 := createPodAndContainer(cch, "l6", "light", "dualcpu","B","20.5")
+	p.AllocateResources(lightContainer6)
 
-	// insert to pool 
-	_,heavyContainer4 := createPodAndContainer(cch, "h4", "heavy", "dualcpu")
+	lightPod1.SetFPSData(60, 20)
+	lightPod2.SetFPSData(60, 20)
+	lightPod3.SetFPSData(60, 20)
+	lightPod4.SetFPSData(60, 20)
+	lightPod5.SetFPSData(60, 20)
+	lightPod6.SetFPSData(60, 20)
+
+	// insert to pool 2 (calculate capacity)
+	// pool 2 = 1 heavy + 1 light
+	_,lightContainer7 := createPodAndContainer(cch, "l7", "light", "dualcpu","B","20.5")
+	p.AllocateResources(lightContainer7)
+	_, lightContainer8 := createPodAndContainer(cch, "l8", "light", "dualcpu","B","20.5")
+	p.AllocateResources(lightContainer8)
+	_, lightContainer9 := createPodAndContainer(cch, "l9", "light", "dualcpu","B","20.5")
+	p.AllocateResources(lightContainer9)
+
+	// pool 1 = 4 light
+	p.ReleaseResources(lightContainer1)
+	p.ReleaseResources(lightContainer2)
+	lightPod3.SetFPSData(60, 18)
+	lightPod4.SetFPSData(60, 18)
+	lightPod5.SetFPSData(60, 18)
+	lightPod6.SetFPSData(60, 18)
+
+	// pool1 = 4 light + 1 heavy
+	_ ,heavyContainer4 := createPodAndContainer(cch, "h4", "heavy", "dualcpu","A","20.5")
 	p.AllocateResources(heavyContainer4)
+
+	// // insert to pool 
+	// _,heavyContainer4 := createPodAndContainer(cch, "h4", "heavy", "dualcpu")
+	// p.AllocateResources(heavyContainer4)
 	
 }
