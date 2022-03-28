@@ -130,12 +130,6 @@ func (r *relay) Setup() error {
 		}
 	}
 
-	if r.options.FPSSocket != DisableService {
-		if err := r.fpsserver.RegisterFPSService(); err != nil {
-			return relayError("failed to register runtime service: %v", err)
-		}
-	}
-
 	return nil
 }
 
@@ -145,8 +139,10 @@ func (r *relay) Start() error {
 		return relayError("failed to start relay: %v", err)
 	}
 
-	if err := r.fpsserver.Start(); err != nil {
-		return relayError("failed to start relay: %v", err)
+	if r.options.FPSSocket != DisableService {
+		if err := r.fpsserver.Start(); err != nil {
+			return relayError("failed to start relay: %v", err)
+		}
 	}
 
 	return nil

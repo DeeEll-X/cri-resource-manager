@@ -16,26 +16,21 @@ package fpsserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
 	"os/user"
 	"path/filepath"
 	"strconv"
-	// "strings"
 	"time"
 
 	"google.golang.org/grpc"
-
-	// api "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
-
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/sockets"
-	// "github.com/intel/cri-resource-manager/pkg/dump"
 	logger "github.com/intel/cri-resource-manager/pkg/log"
 	"github.com/intel/cri-resource-manager/pkg/utils"
 
-	"github.com/intel/cri-resource-manager/pkg/instrumentation"
-	// "go.opencensus.io/trace"
+	// "github.com/intel/cri-resource-manager/pkg/instrumentation"
 )
 
 // Options contains the configurable options of our CRI server.
@@ -55,6 +50,21 @@ type Options struct {
 // Handler is a CRI server generic request handler.
 type Handler grpc.UnaryHandler
 
+type fpsData struct {
+	cpus		[]int
+	fps			float64
+	game 		string
+	isFpsDrop	bool
+	keyRunning	float64
+	keyRunnable	float64
+	keyThread		int
+	microTimeStamp	time.Time
+	podSandboxId	string
+	totalRunning	float64
+	totalRunnable	float64
+	totalThread		int
+}
+
 type FPSDropHandler interface{
 	HandleFPSDrop(string) error
 	RecordFPSData(string, float64, float64) error
@@ -62,8 +72,6 @@ type FPSDropHandler interface{
 
 // Server is the interface we expose for controlling our CRI server.
 type Server interface {
-	// RegisterFPSService registers the server.
-	RegisterFPSService() error
 	// RegisterFPSDropHandler registers the given FPSDropHandler with the server.
 	RegisterFPSDropHandler(FPSDropHandler) error
 	// Start starts the request processing loop (goroutine) of the server.
@@ -114,17 +122,6 @@ func(s *server) RecordFPSData(ctx context.Context, request *FPSStatistic) (*FPSS
 }
 
 
-// RegisterImageService registers an image service with the server.
-func (s *server) RegisterFPSService() error {
-	if err := s.createGrpcServer(); err != nil {
-		return err
-	}
-
-	RegisterFPSServiceServer(s.server, s)
-
-	return nil
-}
-
 func (s *server) RegisterFPSDropHandler(handler FPSDropHandler) error {
 	s.fpsDropHandler = &handler
 
@@ -134,18 +131,66 @@ func (s *server) RegisterFPSDropHandler(handler FPSDropHandler) error {
 
 // Start starts the servers request processing goroutine.
 func (s *server) Start() error {
-
-	s.Debug("starting server on socket %s...", s.options.Socket)
-	go func() {
-		s.server.Serve(s.listener)
-	}()
-
-	s.Debug("waiting for server to become ready...")
-	if err := utils.WaitForServer(s.options.Socket, time.Second); err != nil {
+	if err := s.createFPSServer(); err != nil {
 		return serverError("starting CRI server failed: %v", err)
 	}
+	
+	s.Debug("starting server on socket %s...", s.options.Socket)
+	go func() {
+		for {
+			c, err := s.listener.Accept()
+			if err != nil {
+				s.Info("Accept: " + err.Error())
+			} else {
+				go s.HandleServerConn(c)
+			}
+		}
+	}()
 
 	return nil
+}
+
+func(s *server) HandleServerConn(c net.Conn) {
+	s.Info("### HandleServerConn start", c)
+	defer c.Close()
+	buf := make([]byte, 10480)
+	for {
+		nr, err := c.Read(buf)
+		if err != nil {
+			s.Error("Read: " + err.Error())
+			break
+		} else {
+			s.parseMsg(buf[:nr])
+			s.Error("msg:" + string(buf[0:nr]))
+		}
+	}
+	s.Info("### HandleServerConn end")
+}
+
+func(s *server) parseMsg(buf []byte){
+	var start int
+	var end	int
+	var data map[string]string
+	length := len(buf)
+	
+	for start = 0;start <length;{
+		if buf[start] != '{' {
+			start = start + 1
+			continue
+		} else {
+			for end = start; end<length; end = end + 1{
+				if buf[end] == '}'{
+					break
+				}
+			}
+			if err := json.Unmarshal(buf[start:end+1], &data); err != nil {
+				panic(err)
+			}
+			// handle data
+			start = end + 1
+		}
+	}
+
 }
 
 // Stop serving CRI requests.
@@ -154,8 +199,8 @@ func (s *server) Stop() {
 	s.server.Stop()
 }
 
-// createGrpcServer creates a gRPC server instance on our socket.
-func (s *server) createGrpcServer() error {
+// createFPSServer creates a FPS server instance on our socket.
+func (s *server) createFPSServer() error {
 	if s.server != nil {
 		return nil
 	}
@@ -197,8 +242,6 @@ func (s *server) createGrpcServer() error {
 			return err
 		}
 	}
-
-	s.server = grpc.NewServer(instrumentation.InjectGrpcServerTrace()...)
 
 	return nil
 }
