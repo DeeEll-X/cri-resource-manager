@@ -15,7 +15,6 @@
 package fpsserver
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -23,14 +22,13 @@ import (
 	"os/user"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
-	"google.golang.org/grpc"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/sockets"
 	logger "github.com/intel/cri-resource-manager/pkg/log"
 	"github.com/intel/cri-resource-manager/pkg/utils"
-
-	// "github.com/intel/cri-resource-manager/pkg/instrumentation"
+	"google.golang.org/grpc"
 )
 
 // Options contains the configurable options of our CRI server.
@@ -50,24 +48,35 @@ type Options struct {
 // Handler is a CRI server generic request handler.
 type Handler grpc.UnaryHandler
 
-type fpsData struct {
-	cpus		[]int
-	fps			float64
-	game 		string
-	isFpsDrop	bool
-	keyRunning	float64
-	keyRunnable	float64
-	keyThread		int
-	microTimeStamp	time.Time
-	podSandboxId	string
-	totalRunning	float64
-	totalRunnable	float64
-	totalThread		int
+type fpsDataMsg struct {
+	Cpus		string	`json:"cpus"`
+	Fps			string	`json:"fps"`
+	Game 		string	`json:"game"`	
+	IsFpsDrop	string	`json:"isFpsDrop"`
+	KeySched	string	`json:"keySched"`
+	MicroTimeStamp	string	`json:"microTimeStamp"`
+	PodName		string		`json:"pod"`
+	TotalSched	string		`json:"totalSched"`
+}
+
+type FpsData struct {
+	Cpus		[]int
+	Fps			float64
+	Game 		string
+	IsFpsDrop	bool
+	KeyRunning	float64
+	KeyRunnable	float64
+	KeyThread		int
+	MicroTimeStamp	time.Time
+	PodName	string
+	TotalRunning	float64
+	TotalRunnable	float64
+	TotalThread		int
 }
 
 type FPSDropHandler interface{
 	HandleFPSDrop(string) error
-	RecordFPSData(string, float64, float64) error
+	RecordFPSData(FpsData) error
 }
 
 // Server is the interface we expose for controlling our CRI server.
@@ -88,10 +97,8 @@ type Server interface {
 type server struct {
 	logger.Logger
 	listener     net.Listener              // socket our gRPC server listens on
-	server       *grpc.Server              // our gRPC server
 	options      Options                   // server options
 	fpsDropHandler *FPSDropHandler
-	UnimplementedFPSServiceServer
 } 
 
 // NewServer creates a new server instance.
@@ -108,19 +115,6 @@ func NewServer(options Options) (Server, error) {
 
 	return s, nil
 }
-
-func(s *server) RecordFPSData(ctx context.Context, request *FPSStatistic) (*FPSStatisticReply, error) {
-	s.Info("receive FPS statistics message, fps %f, schedule time %f", request.Fps, request.SchedTime)
-	reply := FPSStatisticReply{
-	}
-	(*s.fpsDropHandler).RecordFPSData(request.PodSandboxId, request.Fps, request.SchedTime)
-	if request.IsFpsDrop {
-		s.Info("podSandbox %s fps drop", request.PodSandboxId)
-		(*s.fpsDropHandler).HandleFPSDrop(request.PodSandboxId)
-	}
-	return &reply, nil
-}
-
 
 func (s *server) RegisterFPSDropHandler(handler FPSDropHandler) error {
 	s.fpsDropHandler = &handler
@@ -160,19 +154,22 @@ func(s *server) HandleServerConn(c net.Conn) {
 			s.Error("Read: " + err.Error())
 			break
 		} else {
-			s.parseMsg(buf[:nr])
-			s.Error("msg:" + string(buf[0:nr]))
+			fpsDatas := s.parseMsg(buf[:nr])
+			s.handlefpsDataMsg(fpsDatas)
+
+			s.Info("msg:" + string(buf[0:nr]))
 		}
 	}
 	s.Info("### HandleServerConn end")
 }
 
-func(s *server) parseMsg(buf []byte){
+func(s *server) parseMsg(buf []byte) []FpsData {
 	var start int
 	var end	int
-	var data map[string]string
+	var msg fpsDataMsg
+	var fpsDatas []FpsData
 	length := len(buf)
-	
+
 	for start = 0;start <length;{
 		if buf[start] != '{' {
 			start = start + 1
@@ -183,28 +180,69 @@ func(s *server) parseMsg(buf []byte){
 					break
 				}
 			}
-			if err := json.Unmarshal(buf[start:end+1], &data); err != nil {
+			s.Info(string(buf[start:end+1]))
+			if err := json.Unmarshal(buf[start:end+1], &msg); err != nil {
 				panic(err)
 			}
-			// handle data
+			s.Info("%#v",msg)
 			start = end + 1
+
+			data := msg.convertToFpsData()
+			s.Info("%#v",data)
+			fpsDatas = append(fpsDatas, data)
+		
 		}
 	}
-
+	return fpsDatas
 }
 
+func(rd *fpsDataMsg) convertToFpsData() FpsData {
+	data := FpsData{}
+
+	cpus := strings.Split(rd.Cpus, "-")
+	startcpu,_ := strconv.Atoi(cpus[0])
+	endcpu,_ := strconv.Atoi(cpus[len(cpus)-1])
+	for i:= startcpu; i<=endcpu; i = i+1 {
+		data.Cpus = append(data.Cpus, i)
+	}
+
+	data.Cpus = append(data.Cpus, )
+	data.Fps, _ = strconv.ParseFloat(rd.Fps,64)
+	data.Game = rd.Game
+	data.IsFpsDrop,_ = strconv.ParseBool(rd.IsFpsDrop)
+
+	keySched := strings.Split(rd.KeySched,",")
+	data.KeyRunning,_ = strconv.ParseFloat(keySched[0],64)
+	data.KeyRunnable,_ = strconv.ParseFloat(keySched[1], 64)
+	data.KeyThread,_ = strconv.Atoi(keySched[2])
+
+	data.PodName = rd.PodName
+	microsecond,_ := strconv.ParseInt(rd.MicroTimeStamp,10,64)
+	sec := microsecond / 1000000
+	microsecond = microsecond % 1000000
+	data.MicroTimeStamp = time.Unix(sec, microsecond * int64(time.Microsecond))
+
+	totalSched := strings.Split(rd.TotalSched,",")
+	data.TotalRunning,_ = strconv.ParseFloat(totalSched[0],64)
+	data.TotalRunnable,_ = strconv.ParseFloat(totalSched[1],64)
+	data.TotalThread,_ = strconv.Atoi(totalSched[2])
+
+	return data
+}
+
+func(s *server) handlefpsDataMsg(fpsDatas []FpsData) {
+	for _,data := range fpsDatas {
+		(*s.fpsDropHandler).RecordFPSData(data)
+	}
+}
 // Stop serving CRI requests.
 func (s *server) Stop() {
 	s.Debug("stopping server on socket %s...", s.options.Socket)
-	s.server.Stop()
+	// TODO
 }
 
 // createFPSServer creates a FPS server instance on our socket.
 func (s *server) createFPSServer() error {
-	if s.server != nil {
-		return nil
-	}
-
 	if err := os.MkdirAll(filepath.Dir(s.options.Socket), sockets.DirPermissions); err != nil {
 		return serverError("failed to create directory for socket %s: %v",
 			s.options.Socket, err)
@@ -298,15 +336,6 @@ func (s *server) collectStatistics(kind, name string, start, send, recv, end tim
 	s.Debug(" * latency for %s: preprocess: %v, CRI server: %v, postprocess: %v, total: %v",
 		name, pre, server, post, pre+server+post)
 }
-
-
-// // qualifier pulls a qualifier for disambiguation from a CRI request message.
-// func (s server) qualifier(msg interface{}) string {
-// 	if fn := s.options.QualifyReqFn; fn != nil {
-// 		return fn(msg)
-// 	}
-// 	return ""
-// }
 
 // Return a formatter server error.
 func serverError(format string, args ...interface{}) error {

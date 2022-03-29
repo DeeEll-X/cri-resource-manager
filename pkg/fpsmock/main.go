@@ -2,46 +2,56 @@
 package main
 
 import (
-	"context"
-	"flag"
+	"fmt"
+	"io/ioutil"
 	"log"
-	"time"
 	"net"
-
-	"google.golang.org/grpc"
-	// "google.golang.org/grpc/credentials/insecure"
-	pb "github.com/intel/cri-resource-manager/pkg/cri/fpsserver"
+	"time"
 )
 
-var (
-	addr = flag.String("addr", "/var/run/cri-resmgr/cri-resmgr-fps.sock", "the address to connect to")
+
+const (
+	protocol = "unix"
+	sockAddr = "/var/run/cri-resmgr/cri-resmgr-fps.sock"
 )
 
 func main() {
-	flag.Parse()
 
-	dialer := func(addr string, t time.Duration) (net.Conn, error) {
-		return net.Dial("unix", addr)
-	}
+	str := []byte(`{"cpus": "1-3",
+			"fps": "28.687267",
+			"game":"stackball",
+			"isFpsDrop": "false",
+			"keySched": "5.90,21.79,4",
+			"microTimeStamp": "1648448084957443",
+			"pod": "",
+			"totalSched": "6.70,49.33,238"
+			}`)
+	
+	for i := 0; i < 5; i++ {
+		time.Sleep(1 * time.Second)
 
-	conn, err := grpc.Dial(*addr, grpc.WithInsecure(), grpc.WithDialer(dialer))
-	if err != nil {
-		log.Fatal(err)
-	}
-	defer conn.Close()
-
-	// Set up a connection to the server.
-	c := pb.NewFPSServiceClient(conn)
-
-	// Contact the server and print out its response.
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	for i:=0; i < 10; i++ {
-		_, err = c.SetFPSData(ctx, &pb.FPSStatistic{PodSandboxId: "12", Fps: 50.0, SchedTime: 0.01})
+		conn, err := net.Dial(protocol, sockAddr)
 		if err != nil {
-			log.Fatalf("could not greet: %v", err)
+			log.Fatal(err)
 		}
-		log.Printf("Greeting")
-        time.Sleep(time.Second)
-    }	
+
+		
+		_, err = conn.Write(str)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+	
+		err = conn.(*net.UnixConn).CloseWrite()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		b, err := ioutil.ReadAll(conn)
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		fmt.Println(string(b))
+	}
 }

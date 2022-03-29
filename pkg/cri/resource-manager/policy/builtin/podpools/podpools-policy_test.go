@@ -675,8 +675,8 @@ func TestFillRebalance(t *testing.T) {
 	heavyPod2,heavyContainer2 := createPodAndContainer(cch, "h2", "heavy", "dualcpu", "A","20.5")
 	p.AllocateResources(heavyContainer2)
 
-	heavyPod1.SetFPSData(60, 18)
-	heavyPod2.SetFPSData(60, 18)
+	heavyPod1.SetFPSData("A", 60, 18)
+	heavyPod2.SetFPSData("A", 60, 18)
 
 	// in pool 1 = 2 light
 	lightPod1,lightContainer1 := createPodAndContainer(cch,"l1","light","dualcpu","B","20.5")
@@ -684,8 +684,8 @@ func TestFillRebalance(t *testing.T) {
 	lightPod2,lightContainer2 := createPodAndContainer(cch, "l2", "light", "dualcpu","B","20.5")
 	p.AllocateResources(lightContainer2)
 	 
-	lightPod1.SetFPSData(60, 16)
-	lightPod2.SetFPSData(60, 16)
+	lightPod1.SetFPSData("B",60, 16)
+	lightPod2.SetFPSData("B",60, 16)
 
 	// insert to pool 0, but rebalance to pool 2
 	// pool 2 = 1 heavy
@@ -709,12 +709,12 @@ func TestFillRebalance(t *testing.T) {
 	lightPod6,lightContainer6 := createPodAndContainer(cch, "l6", "light", "dualcpu","B","20.5")
 	p.AllocateResources(lightContainer6)
 
-	lightPod1.SetFPSData(60, 20)
-	lightPod2.SetFPSData(60, 20)
-	lightPod3.SetFPSData(60, 20)
-	lightPod4.SetFPSData(60, 20)
-	lightPod5.SetFPSData(60, 20)
-	lightPod6.SetFPSData(60, 20)
+	lightPod1.SetFPSData("B",60, 20)
+	lightPod2.SetFPSData("B",60, 20)
+	lightPod3.SetFPSData("B",60, 20)
+	lightPod4.SetFPSData("B",60, 20)
+	lightPod5.SetFPSData("B",60, 20)
+	lightPod6.SetFPSData("B",60, 20)
 
 	// insert to pool 2 (calculate capacity)
 	// pool 2 = 1 heavy + 1 light
@@ -728,10 +728,10 @@ func TestFillRebalance(t *testing.T) {
 	// pool 1 = 4 light
 	p.ReleaseResources(lightContainer1)
 	p.ReleaseResources(lightContainer2)
-	lightPod3.SetFPSData(60, 18)
-	lightPod4.SetFPSData(60, 18)
-	lightPod5.SetFPSData(60, 18)
-	lightPod6.SetFPSData(60, 18)
+	lightPod3.SetFPSData("B",60, 18)
+	lightPod4.SetFPSData("B",60, 18)
+	lightPod5.SetFPSData("B",60, 18)
+	lightPod6.SetFPSData("B",60, 18)
 
 	// pool1 = 4 light + 1 heavy
 	_ ,heavyContainer4 := createPodAndContainer(cch, "h4", "heavy", "dualcpu","A","20.5")

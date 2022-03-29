@@ -173,13 +173,14 @@ type Pod interface {
 	GetTasks(bool) ([]string, error)
 	
 	// SetFpsData set the fps data of a pod
-	SetFPSData(float64, float64)
+	SetFPSData(game string,fps float64,scheduletime float64)
 	// GetFPSData returns the game fps related data
 	GetFPSData() PodFpsData
 }
 
 // pod fps data
 type PodFpsData struct {
+	Game			string						// game of the pod
 	Fps				float64						// latest fps
 	Schedtime		float64						// latest schedule time
 }
@@ -536,6 +537,8 @@ type Cache interface {
 	DeletePod(id string) Pod
 	// LookupPod looks up a pod in the cache.
 	LookupPod(id string) (Pod, bool)
+	// LookupPodByName looks up a pod in the
+	LookupPodByName(name string) (Pod, bool)
 	// InsertContainer inserts a container into the cache, using a runtime request or reply.
 	InsertContainer(msg interface{}) (Container, error)
 	// UpdateContainerID updates a containers runtime id.
@@ -911,6 +914,15 @@ func (cch *cache) DeletePod(id string) Pod {
 func (cch *cache) LookupPod(id string) (Pod, bool) {
 	p, ok := cch.Pods[id]
 	return p, ok
+}
+
+func (cch *cache) LookupPodByName(name string) (Pod, bool) {
+	for _, pod := range cch.Pods {
+		if pod.Name == name {
+			return pod ,true
+		}
+	}
+	return nil ,false
 }
 
 // Insert a container into the cache.

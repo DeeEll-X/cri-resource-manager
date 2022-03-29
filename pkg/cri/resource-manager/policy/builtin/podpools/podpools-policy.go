@@ -151,12 +151,7 @@ func CreatePodpoolsPolicy(policyOptions *policy.BackendOptions) policy.Backend {
 		podMaxMilliCPU: make(map[string]int64),
 		cpuAllocator:   cpuallocator.NewCPUAllocator(policyOptions.System),
 		gameThreshold: make(map[string]float64),
-		interferes: gameInterfere{
-			heavyToHeavy: 3,
-			heavyToLight: 2,
-			lightToHeavy: 1,
-			lightToLight: 0.5,
-		},
+		interferes: gameInterfere{},
 		clock: &clock{},
 	}
 	log.Info("creating %s policy...", PolicyName)
@@ -301,6 +296,13 @@ func (p *podpools) Rebalance() (bool, error) {
 func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 	curPool := p.allocatedPool(fpsDropPod)
 
+	fpsData := fpsDropPod.GetFPSData()
+	if value, ok := p.gameThreshold[fpsData.Game]; ok {
+		p.gameThreshold[fpsData.Game] = math.Min(value, fpsData.Schedtime)
+	} else {
+		p.gameThreshold[fpsData.Game] = fpsData.Schedtime
+	}
+
 	if p.clock.Now().Before(curPool.lastRebalanceTime.Add(time.Second)) {
 		return nil
 	} else {
@@ -380,9 +382,10 @@ func (p *podpools) capableForGame(pool *Pool, pod *cache.Pod) bool {
 		}
 		for _, heavyPodID := range pool.HeavyPodIDs {
 			if heavyPod, found := p.cch.LookupPod(heavyPodID); found {
-				if gameName, gnok := heavyPod.GetAnnotation("gameName"); gnok{
+				fpsData := heavyPod.GetFPSData()
+				if threshold, exist := p.gameThreshold[fpsData.Game]; exist {
 					fpsData := heavyPod.GetFPSData()
-					if fpsData.Schedtime + iToHeavy < p.gameThreshold[gameName]{
+					if fpsData.Schedtime + iToHeavy < threshold{
 						continue
 					} else {
 						if value == "light" {
@@ -390,9 +393,7 @@ func (p *podpools) capableForGame(pool *Pool, pod *cache.Pod) bool {
 						}
 						return false;
 					}
-				} else {
-					log.Error("cannot find game name with podID %q",(*pod).GetID())
-				}
+				} 
 			} else {
 				log.Error("cannot find pod with podID %q",(*pod).GetID())
 			}
@@ -400,9 +401,9 @@ func (p *podpools) capableForGame(pool *Pool, pod *cache.Pod) bool {
 		
 		for _, lightPodID := range pool.LightPodIDs {
 			if lightPod, found := p.cch.LookupPod(lightPodID); found {
-				if gameName, gnok := lightPod.GetAnnotation("gameName"); gnok{
-					fpsData := lightPod.GetFPSData()
-					if fpsData.Schedtime + iToLight < p.gameThreshold[gameName]{
+				fpsData := lightPod.GetFPSData()
+				if threshold, exist := p.gameThreshold[fpsData.Game]; exist{
+					if fpsData.Schedtime + iToLight < threshold{
 						continue
 					} else {
 						if value == "light" {
@@ -410,8 +411,6 @@ func (p *podpools) capableForGame(pool *Pool, pod *cache.Pod) bool {
 						}
 						return false;
 					}
-				}else {
-					log.Error("cannot find game name with podID %q",(*pod).GetID())
 				}
 			} else {
 				log.Error("cannot find pod with podID %q",(*pod).GetID())

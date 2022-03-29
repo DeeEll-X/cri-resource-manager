@@ -503,7 +503,8 @@ func (p *pod) getTasks(recursive, processes bool) ([]string, error) {
 	return pids, nil
 }
 
-func (p *pod) SetFPSData(fps float64, schedtime float64) {
+func (p *pod) SetFPSData(game string, fps float64, schedtime float64) {
+	p.FpsData.Game = game
 	p.FpsData.Fps = fps
 	p.FpsData.Schedtime = schedtime
 }

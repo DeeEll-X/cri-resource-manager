@@ -21,6 +21,7 @@ import (
 	criapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 
 	pkgcfg "github.com/intel/cri-resource-manager/pkg/config"
+	"github.com/intel/cri-resource-manager/pkg/cri/fpsserver"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/cache"
 	config "github.com/intel/cri-resource-manager/pkg/cri/resource-manager/config"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/events"
@@ -915,14 +916,14 @@ func (m *resmgr) HandleFPSDrop(podSandboxId string) error{
 	return nil
 }
 
-func (m *resmgr) RecordFPSData(podSandboxId string, fps float64, schedTime float64) error{
+func (m *resmgr) RecordFPSData(data fpsserver.FpsData) error{
 	m.Lock()
 	defer m.Unlock()
 
-	if pod, ok := m.cache.LookupPod(podSandboxId); ok {
-		pod.SetFPSData(fps, schedTime)
+	if pod, ok := m.cache.LookupPodByName(data.PodName); ok {
+		pod.SetFPSData(data.Game, data.Fps, data.KeyRunnable + data.KeyRunning)
 	} else {
-		m.Warn("failed to look up pod %s, fail to record fps data", podSandboxId)
+		m.Warn("failed to look up pod %s, fail to record fps data", data.PodName)
 	}
 	return nil
 }
