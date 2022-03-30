@@ -647,7 +647,7 @@ func (m *mockPod) GetProcesses(bool) ([]string, error) {
 func (m *mockPod) GetTasks(bool) ([]string, error) {
 	panic("unimplemented")
 }
-func (m *mockPod) SetFPSData(float64, float64) {
+func (m *mockPod) SetFPSData(string,float64, float64) {
 	panic("unimplemented")
 }
 func (m *mockPod) GetFPSData() cache.PodFpsData {
@@ -759,5 +759,6 @@ type mockClock struct {
 }
 
 func (c *mockClock) Now() time.Time {
+	c.time.Add(time.Second)
 	return c.time
 }

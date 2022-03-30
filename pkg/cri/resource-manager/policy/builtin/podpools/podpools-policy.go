@@ -232,19 +232,6 @@ func (p *podpools) AllocateResources(c cache.Container) error {
 	if pool := p.allocatePool(pod); pool != nil {
 		p.assignContainer(c, pool)
 		p.trackPodCPU(pod, pool)
-		if pool.Def.FillOrder == FillRebalance {
-			if gameName, gnok := pod.GetAnnotation("gameName"); gnok{
-				if threshold, tok := pod.GetAnnotation("threshold"); tok{
-					if t, err := strconv.ParseFloat(threshold, 64); err == nil {
-						p.gameThreshold[gameName] = t
-					} else {
-						log.Error("cannot parse threshold of game in pod id %p", pod.GetID())
-					}
-				}
-			} else {
-				log.Error("game in pod id %p have no game name", pod.GetID())
-			}
-		}
 		if log.DebugEnabled() {
 			log.Debug(p.dumpPool(pool))
 		}
@@ -295,6 +282,7 @@ func (p *podpools) Rebalance() (bool, error) {
 
 func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 	curPool := p.allocatedPool(fpsDropPod)
+	log.Info("handling fps drop of pod %q in pod %s[%d] ", fpsDropPod.GetName(),curPool.Def.Name, curPool.Instance)
 
 	fpsData := fpsDropPod.GetFPSData()
 	if value, ok := p.gameThreshold[fpsData.Game]; ok {
@@ -304,13 +292,16 @@ func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 	}
 
 	if p.clock.Now().Before(curPool.lastRebalanceTime.Add(time.Second)) {
+		log.Info("the pool %s[%d] is rebalanced within 1s",curPool.Def.Name, curPool.Instance)
 		return nil
 	} else {
 		curPool.lastRebalanceTime = p.clock.Now()
 	}
 
 	var podToMov cache.Pod
-	if value, ok := fpsDropPod.GetAnnotation("weight"); ok {
+	var value string
+	var ok bool
+	if value, ok = fpsDropPod.GetAnnotation("weight"); ok{
 		if value == "heavy" {
 			if len(curPool.LightPodIDs) > 0 {
 				// if exists light game, move light one
@@ -331,8 +322,24 @@ func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 
 		// allocate all the containers and the pod
 		for _,c := range podToMov.GetContainers() {
-			p.AllocateResources(c)
+			if err := p.AllocateResources(c); err != nil {
+				
+				// restore pod in curpool
+				podID := podToMov.GetID()
+				curPool.PodIDs[podID] = []string{}
+				for _, container := range podToMov.GetContainers(){
+					p.assignContainer(container, curPool)
+				}
+				if value == "heavy" {
+					curPool.HeavyPodIDs = append(curPool.HeavyPodIDs, podID)
+				} else {
+					curPool.LightPodIDs = append(curPool.LightPodIDs, podID)
+				}
+				log.Error("cannot find a pool to rebalance")
+				return nil
+			}
 		}
+		
 	}
 	return nil
 }
@@ -534,12 +541,11 @@ func (p *podpools) allocatePool(pod cache.Pod) *Pool {
 						}
 					}
 				}
-
-				pools[0].HeavyPodIDs = append(pools[0].HeavyPodIDs, pod.GetID())
-				if !isPoolfound{
+				if !isPoolfound && len(pools) > 0{
 					log.Error("cannot find free %q pool for pod %q",poolDef.Name, pod.GetName())
+					return nil
 				}
-
+				pools[0].HeavyPodIDs = append(pools[0].HeavyPodIDs, pod.GetID())
 			} else if value == "light" {
 				// find capable pool with most light games and without heavy games 
 				if !isPoolfound {
@@ -563,13 +569,17 @@ func (p *podpools) allocatePool(pod cache.Pod) *Pool {
 						if p.capableForGame(pool, &pod) {
 							pools[0], pools[id] = pools[id], pools[0]
 							isPoolfound = true
+							break
 						}
 					}
 				}
-				pools[0].LightPodIDs = append(pools[0].LightPodIDs, pod.GetID())
-				if !isPoolfound {
+				if !isPoolfound && len(pools) > 0 {
 					log.Error("cannot find free %q pool for pod %q",poolDef.Name, pod.GetName())
+					return nil
 				}
+				pools[0].LightPodIDs = append(pools[0].LightPodIDs, pod.GetID())
+			} else {
+				log.Error("the pod %q have no weight annotation", pod.GetName())
 			}
 		}
 	}
@@ -642,6 +652,7 @@ func (p *podpools) freePool(pod cache.Pod, pool *Pool) {
 			}
 		}
 	}
+	log.Info("delete pod %s from pool %s[%d] ", pod.GetName(),pool.Def.Name, pool.Instance,)
 }
 
 // trackPodCPU keeps track on pod's CPU requests.

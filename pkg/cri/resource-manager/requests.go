@@ -896,32 +896,22 @@ func (m *resmgr) sendCRIRequest(ctx context.Context, request interface{}) (inter
 	}
 }
 
-func (m *resmgr) HandleFPSDrop(podSandboxId string) error{
-	m.Lock()
-	defer m.Unlock()
-
-	if pod, ok := m.cache.LookupPod(podSandboxId); ok {
-		e := &events.Policy{
-			Type:   events.ContainerFpsDrop,
-			Source: "fpsserver",
-			Data:   pod,
-		}
-		if _, err := m.policy.HandleEvent(e); err != nil {
-			m.Error("policy failed to handle event %s: %v", e.Type, err)
-		}
-	} else {
-		m.Warn("failed to look up pod %s, fail to record fps data", podSandboxId)
-	}
-	m.Info("rebalancecontainers returned")
-	return nil
-}
-
 func (m *resmgr) RecordFPSData(data fpsserver.FpsData) error{
 	m.Lock()
 	defer m.Unlock()
 
 	if pod, ok := m.cache.LookupPodByName(data.PodName); ok {
 		pod.SetFPSData(data.Game, data.Fps, data.KeyRunnable + data.KeyRunning)
+		if data.IsFpsDrop{
+			e := &events.Policy{
+				Type:   events.ContainerFpsDrop,
+				Source: "fpsserver",
+				Data:   pod,
+			}
+			if _, err := m.policy.HandleEvent(e); err != nil {
+				m.Error("policy failed to handle event %s: %v", e.Type, err)
+			}
+		}
 	} else {
 		m.Warn("failed to look up pod %s, fail to record fps data", data.PodName)
 	}

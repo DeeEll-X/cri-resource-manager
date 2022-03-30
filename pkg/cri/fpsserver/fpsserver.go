@@ -75,7 +75,6 @@ type FpsData struct {
 }
 
 type FPSDropHandler interface{
-	HandleFPSDrop(string) error
 	RecordFPSData(FpsData) error
 }
 
