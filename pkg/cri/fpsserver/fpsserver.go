@@ -26,9 +26,11 @@ import (
 	"time"
 
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/sockets"
+	"github.com/intel/cri-resource-manager/pkg/log"
 	logger "github.com/intel/cri-resource-manager/pkg/log"
 	"github.com/intel/cri-resource-manager/pkg/utils"
 	"google.golang.org/grpc"
+	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 )
 
 // Options contains the configurable options of our CRI server.
@@ -49,32 +51,32 @@ type Options struct {
 type Handler grpc.UnaryHandler
 
 type fpsDataMsg struct {
-	Cpus		string	`json:"cpus"`
-	Fps			string	`json:"fps"`
-	Game 		string	`json:"game"`	
-	IsFpsDrop	string	`json:"isFpsDrop"`
-	KeySched	string	`json:"keySched"`
-	MicroTimeStamp	string	`json:"microTimeStamp"`
-	PodName		string		`json:"pod"`
-	TotalSched	string		`json:"totalSched"`
+	Cpus           string `json:"cpu"`
+	Fps            string `json:"fps"`
+	Game           string `json:"game"`
+	IsFpsDrop      string `json:"isFpsDrop"`
+	KeySched       string `json:"keySched"`
+	MicroTimeStamp string `json:"microTimeStamp"`
+	PodName        string `json:"pod"`
+	TotalSched     string `json:"totalSched"`
 }
 
 type FpsData struct {
-	Cpus		[]int
-	Fps			float64
-	Game 		string
-	IsFpsDrop	bool
-	KeyRunning	float64
-	KeyRunnable	float64
-	KeyThread		int
-	MicroTimeStamp	time.Time
-	PodName	string
-	TotalRunning	float64
-	TotalRunnable	float64
-	TotalThread		int
+	Cpus           []int
+	Fps            float64
+	Game           string
+	IsFpsDrop      bool
+	KeyRunning     float64
+	KeyRunnable    float64
+	KeyThread      int
+	MicroTimeStamp time.Time
+	PodName        string
+	TotalRunning   float64
+	TotalRunnable  float64
+	TotalThread    int
 }
 
-type FPSDropHandler interface{
+type FPSDropHandler interface {
 	RecordFPSData(FpsData) error
 }
 
@@ -95,10 +97,10 @@ type Server interface {
 // server is the implementation of Server.
 type server struct {
 	logger.Logger
-	listener     net.Listener              // socket our gRPC server listens on
-	options      Options                   // server options
+	listener       net.Listener // socket our gRPC server listens on
+	options        Options      // server options
 	fpsDropHandler *FPSDropHandler
-} 
+}
 
 // NewServer creates a new server instance.
 func NewServer(options Options) (Server, error) {
@@ -115,20 +117,25 @@ func NewServer(options Options) (Server, error) {
 	return s, nil
 }
 
+func (d *fpsDataMsg) IsValid() bool {
+	return d.Cpus != "" && d.Fps != "" && d.Game != "" && d.IsFpsDrop != "" &&
+		d.KeySched != "" && d.MicroTimeStamp != "" && d.PodName != "" && d.TotalSched != ""
+}
+
 func (s *server) RegisterFPSDropHandler(handler FPSDropHandler) error {
 	s.fpsDropHandler = &handler
 
 	return nil
 }
 
-
 // Start starts the servers request processing goroutine.
 func (s *server) Start() error {
 	if err := s.createFPSServer(); err != nil {
 		return serverError("starting CRI server failed: %v", err)
 	}
-	
+
 	s.Debug("starting server on socket %s...", s.options.Socket)
+
 	go func() {
 		for {
 			c, err := s.listener.Accept()
@@ -143,97 +150,82 @@ func (s *server) Start() error {
 	return nil
 }
 
-func(s *server) HandleServerConn(c net.Conn) {
-	s.Info("### HandleServerConn start", c)
+func (s *server) HandleServerConn(c net.Conn) {
+	s.Info("HandleServerConn start", c)
 	defer c.Close()
 	buf := make([]byte, 10480)
 	for {
 		nr, err := c.Read(buf)
 		if err != nil {
-			s.Error("Read: " + err.Error())
+			s.Error("Fail to read:" + err.Error())
 			break
 		} else {
+			s.Info("Receive Msessage:" + string(buf[0:nr]))
 			fpsDatas := s.parseMsg(buf[:nr])
 			s.handlefpsDataMsg(fpsDatas)
-
-			s.Info("msg:" + string(buf[0:nr]))
 		}
 	}
-	s.Info("### HandleServerConn end")
+	s.Info("HandleServerConn end")
 }
 
-func(s *server) parseMsg(buf []byte) []FpsData {
-	var start int
-	var end	int
+func (s *server) parseMsg(buf []byte) []FpsData {
 	var msg fpsDataMsg
 	var fpsDatas []FpsData
-	length := len(buf)
-
-	for start = 0;start <length;{
-		if buf[start] != '{' {
-			start = start + 1
-			continue
-		} else {
-			for end = start; end<length; end = end + 1{
-				if buf[end] == '}'{
-					break
-				}
-			}
-			s.Info(string(buf[start:end+1]))
-			if err := json.Unmarshal(buf[start:end+1], &msg); err != nil {
-				panic(err)
-			}
-			s.Info("%#v",msg)
-			start = end + 1
-
-			data := msg.convertToFpsData()
-			s.Info("%#v",data)
-			fpsDatas = append(fpsDatas, data)
-		
-		}
+	if err := json.Unmarshal(buf, &msg); err != nil {
+		panic(err)
+	}
+	if msg.IsValid() {
+		data := msg.convertToFpsData()
+		s.Info("%#v", data)
+		fpsDatas = append(fpsDatas, data)
+	} else {
+		log.Info("Msessage is invalid")
 	}
 	return fpsDatas
 }
 
-func(rd *fpsDataMsg) convertToFpsData() FpsData {
+func (rd *fpsDataMsg) convertToFpsData() FpsData {
 	data := FpsData{}
-
-	cpus := strings.Split(rd.Cpus, "-")
-	startcpu,_ := strconv.Atoi(cpus[0])
-	endcpu,_ := strconv.Atoi(cpus[len(cpus)-1])
-	for i:= startcpu; i<=endcpu; i = i+1 {
-		data.Cpus = append(data.Cpus, i)
+	cpu, e := cpuset.Parse(rd.Cpus)
+	if e != nil {
+		log.Info("ERROR: parse cpuset", e)
+	} else {
+		data.Cpus = cpu.ToSlice()
+	}
+	data.Fps, _ = strconv.ParseFloat(rd.Fps, 64)
+	data.Game = rd.Game
+	data.IsFpsDrop, _ = strconv.ParseBool(rd.IsFpsDrop)
+	if rd.KeySched != "" {
+		keySched := strings.Split(rd.KeySched, ",")
+		if len(keySched) == 3 {
+			data.KeyRunning, _ = strconv.ParseFloat(keySched[0], 64)
+			data.KeyRunnable, _ = strconv.ParseFloat(keySched[1], 64)
+			data.KeyThread, _ = strconv.Atoi(keySched[2])
+		}
 	}
 
-	data.Cpus = append(data.Cpus, )
-	data.Fps, _ = strconv.ParseFloat(rd.Fps,64)
-	data.Game = rd.Game
-	data.IsFpsDrop,_ = strconv.ParseBool(rd.IsFpsDrop)
-
-	keySched := strings.Split(rd.KeySched,",")
-	data.KeyRunning,_ = strconv.ParseFloat(keySched[0],64)
-	data.KeyRunnable,_ = strconv.ParseFloat(keySched[1], 64)
-	data.KeyThread,_ = strconv.Atoi(keySched[2])
-
 	data.PodName = rd.PodName
-	microsecond,_ := strconv.ParseInt(rd.MicroTimeStamp,10,64)
+	microsecond, _ := strconv.ParseInt(rd.MicroTimeStamp, 10, 64)
 	sec := microsecond / 1000000
 	microsecond = microsecond % 1000000
-	data.MicroTimeStamp = time.Unix(sec, microsecond * int64(time.Microsecond))
-
-	totalSched := strings.Split(rd.TotalSched,",")
-	data.TotalRunning,_ = strconv.ParseFloat(totalSched[0],64)
-	data.TotalRunnable,_ = strconv.ParseFloat(totalSched[1],64)
-	data.TotalThread,_ = strconv.Atoi(totalSched[2])
-
+	data.MicroTimeStamp = time.Unix(sec, microsecond*int64(time.Microsecond))
+	if rd.TotalSched != "" {
+		totalSched := strings.Split(rd.TotalSched, ",")
+		if len(totalSched) == 3 {
+			data.TotalRunning, _ = strconv.ParseFloat(totalSched[0], 64)
+			data.TotalRunnable, _ = strconv.ParseFloat(totalSched[1], 64)
+			data.TotalThread, _ = strconv.Atoi(totalSched[2])
+		}
+	}
 	return data
 }
 
-func(s *server) handlefpsDataMsg(fpsDatas []FpsData) {
-	for _,data := range fpsDatas {
+func (s *server) handlefpsDataMsg(fpsDatas []FpsData) {
+	for _, data := range fpsDatas {
 		(*s.fpsDropHandler).RecordFPSData(data)
 	}
 }
+
 // Stop serving CRI requests.
 func (s *server) Stop() {
 	s.Debug("stopping server on socket %s...", s.options.Socket)
@@ -286,11 +278,11 @@ func (s *server) createFPSServer() error {
 // Chmod changes the permissions of the server's socket.
 func (s *server) Chmod(mode os.FileMode) error {
 	if s.listener != nil {
-		if err := os.Chmod(s.options.Socket, mode); err != nil {
+		if err := os.Chmod(s.options.Socket, 0777); err != nil {
 			return serverError("failed to change permissions of socket %q to %v: %v",
 				s.options.Socket, mode, err)
 		}
-		s.Info("changed permissions of socket %q to %v", s.options.Socket, mode)
+		s.Info("changed permissions of socket %q to %v", s.options.Socket, "0777")
 	}
 
 	s.options.Mode = mode
