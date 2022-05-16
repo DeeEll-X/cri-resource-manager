@@ -242,7 +242,7 @@ func (s *server) handlefpsDataMsg(fpsDatas []FpsData) {
 	for _, data := range fpsDatas {
 		if timeStamp, ok := s.firstValidFPSDataTime[data.PodName]; ok {
 			// start handle FPS data 1 minute after the first valid FPS message
-			if data.MicroTimeStamp.After(timeStamp.Add(time.Minute)){
+			if data.MicroTimeStamp.After(timeStamp.Add(time.Second*75)){
 				s.Debug("Call fpsDropHandler.RecordFPSData")
 				(*s.fpsDropHandler).RecordFPSData(data)
 			} else {

@@ -285,9 +285,9 @@ func isHeavyGame(pod cache.Pod) bool {
 	if appInfo, ok := pod.GetLabel("appInfo"); ok {
 		strs := strings.Split(appInfo, "-")
 		if strs[0] == "subway" {
-			return true
-		} else if strs[0] == "netease" {
 			return false
+		} else if strs[0] == "netease" {
+			return true
 		}
 	}
 	return false
@@ -326,7 +326,6 @@ func isAndroidPod(pod cache.Pod) bool {
 
 func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 	curPool := p.allocatedPool(fpsDropPod)
-	log.Info("handling fps drop of pod %q in pod %s[%d] ", fpsDropPod.GetName(), curPool.Def.Name, curPool.Instance)
 
 	fpsData := fpsDropPod.GetFPSData()
 	if value, ok := p.gameThreshold[fpsData.Game]; ok {
@@ -344,6 +343,8 @@ func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 		return nil
 	} else {
 		curPool.lastRebalanceTime = p.clock.Now()
+		log.Info("handling fps drop of pod %q in pool %s[%d] ", fpsDropPod.GetName(), curPool.Def.Name, curPool.Instance)
+
 	}
 
 	var podToMov cache.Pod
@@ -420,7 +421,7 @@ func (p *podpools) allocatedPool(pod cache.Pod) *Pool {
 
 func (p *podpools) capableForGame(pool *Pool, pod *cache.Pod) bool {
 	if pool.isFull {
-		log.Info("FULL: pool %s is capable for podID %q", *pool, (*pod).GetID())
+		log.Info("FULL: pool %s is not capable for podID %q", *pool, (*pod).GetID())
 		return false
 	}
 
@@ -604,8 +605,9 @@ func (p *podpools) allocatePool(pod cache.Pod) *Pool {
 				}
 			}
 			if !isPoolfound && len(pools) > 0 {
-				log.Error("cannot find free %q pool for pod %q", poolDef.Name, pod.GetName())
-				return nil
+				log.Error("cannot find free %q pool for pod %q, falling back to %q", poolDef.Name, pod.GetName(), defaultPoolDefName)
+				pools = []*Pool{p.pools[1]}
+				break
 			}
 			pools[0].HeavyPodIDs = append(pools[0].HeavyPodIDs, pod.GetID())
 		} else {
@@ -641,7 +643,8 @@ func (p *podpools) allocatePool(pod cache.Pod) *Pool {
 			}
 			if !isPoolfound && len(pools) > 0 {
 				log.Error("cannot find free %q pool for pod %q, falling back to %q", poolDef.Name, pod.GetName(), defaultPoolDefName)
-				return nil
+				pools = []*Pool{p.pools[1]}
+				break
 			}
 			pools[0].LightPodIDs = append(pools[0].LightPodIDs, pod.GetID())
 		}
