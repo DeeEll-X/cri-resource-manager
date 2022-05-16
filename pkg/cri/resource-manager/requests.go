@@ -21,11 +21,13 @@ import (
 	criapi "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 
 	pkgcfg "github.com/intel/cri-resource-manager/pkg/config"
+	"github.com/intel/cri-resource-manager/pkg/cri/fpsserver"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/cache"
 	config "github.com/intel/cri-resource-manager/pkg/cri/resource-manager/config"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/events"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/policy"
 	"github.com/intel/cri-resource-manager/pkg/cri/server"
+	"github.com/intel/cri-resource-manager/pkg/log"
 )
 
 // setupRequestProcessing prepares the resource manager for CRI request processing.
@@ -49,6 +51,8 @@ func (m *resmgr) setupRequestProcessing() error {
 	}
 
 	m.relay.Server().SetBypassCheckFn(m.policy.Bypassed)
+
+	m.relay.FPSServer().RegisterFPSDropHandler(m)
 
 	return nil
 }
@@ -858,6 +862,7 @@ func (m *resmgr) runPostReleaseHooks(ctx context.Context, method string, release
 // runPostUpdateHooks runs the necessary hooks after reconcilation.
 func (m *resmgr) runPostUpdateHooks(ctx context.Context, method string) error {
 	for _, c := range m.cache.GetPendingContainers() {
+		log.Info("container %s has pending requests", c.PrettyName())
 		switch c.GetState() {
 		case cache.ContainerStateRunning, cache.ContainerStateCreated:
 			if err := m.control.RunPostUpdateHooks(c); err != nil {
@@ -891,4 +896,35 @@ func (m *resmgr) sendCRIRequest(ctx context.Context, request interface{}) (inter
 	default:
 		return nil, resmgrError("sendCRIRequest: unhandled request type %T", request)
 	}
+}
+
+func (m *resmgr) RecordFPSData(data fpsserver.FpsData) error{
+	m.Lock()
+	defer m.Unlock()
+
+	if pod, ok := m.cache.LookupPodByName(data.PodName); ok {
+		pod.SetFPSData(data.Game, data.Fps, data.TotalRunnable+data.TotalRunning)
+		pod.SetFPSDropTimes(data.IsFpsDrop)
+		if data.IsFpsDrop {
+			e := &events.Policy{
+				Type:   events.ContainerFpsDrop,
+				Source: "fpsserver",
+				Data:   pod,
+			}
+			if _, err := m.policy.HandleEvent(e); err != nil {
+				m.Error("policy failed to handle event %s: %v", e.Type, err)
+			}
+			if pod.NeedRebalance(){
+				log.Info("call runpostupdatehooks to update cpuset")
+				if err := m.runPostUpdateHooks(context.Background(), "pinCpuMem"); err != nil {
+					m.Error("failed to run post-update hooks after recording fps data: %v", err)
+					return resmgrError("failed to run post-update hooks after recording fps data: %v", err)
+				}
+				pod.SetFPSDropTimes(false)
+			}
+		}
+	} else {
+		m.Warn("failed to look up pod %s, fail to record fps data", data.PodName)
+	}
+	return nil
 }

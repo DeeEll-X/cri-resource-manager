@@ -16,9 +16,11 @@ package podpools
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	resapi "k8s.io/apimachinery/pkg/api/resource"
@@ -57,6 +59,13 @@ const (
 	podMilliCPUErrorMargin = int64(10)
 )
 
+type gameInterfere struct {
+	heavyToHeavy float64
+	heavyToLight float64
+	lightToHeavy float64
+	lightToLight float64
+}
+
 // podpools contains configuration and runtime attributes of the podpools policy
 type podpools struct {
 	options         *policyapi.BackendOptions // configuration common to all policies
@@ -69,6 +78,19 @@ type podpools struct {
 	pools           []*Pool                   // pools for pods: reserved, default and user-defined
 	podMaxMilliCPU  map[string]int64          // maximum total MilliCPUs requested by containers of pods in pools
 	cpuAllocator    cpuallocator.CPUAllocator // CPU allocator used by the policy
+	gameThreshold   map[string]float64        // record thresholds of each game
+	interferes      gameInterfere             // games' mutual interfere
+	clock           Clock
+}
+
+type Clock interface {
+	Now() time.Time
+}
+
+type clock struct{}
+
+func (c *clock) Now() time.Time {
+	return time.Now()
 }
 
 // Pool contains attributes of a pool instance
@@ -88,7 +110,11 @@ type Pool struct {
 	// - len(PodIDs[podID]) is the number of containers of podID
 	//   currently assigned to the pool.
 	// - Def.MaxPods - len(PodIDs) is free pod capacity.
-	PodIDs map[string][]string
+	PodIDs            map[string][]string
+	HeavyPodIDs       []string
+	LightPodIDs       []string
+	isFull            bool
+	lastRebalanceTime time.Time
 }
 
 var log logger.Logger = logger.NewLogger("policy")
@@ -125,6 +151,9 @@ func CreatePodpoolsPolicy(policyOptions *policy.BackendOptions) policy.Backend {
 		},
 		podMaxMilliCPU: make(map[string]int64),
 		cpuAllocator:   cpuallocator.NewCPUAllocator(policyOptions.System),
+		gameThreshold:  make(map[string]float64),
+		interferes:     gameInterfere{},
+		clock:          &clock{},
 	}
 	log.Info("creating %s policy...", PolicyName)
 	// Handle common policy options: AvailableResources and ReservedResources.
@@ -195,7 +224,7 @@ func (p *podpools) Sync(add []cache.Container, del []cache.Container) error {
 
 // AllocateResources is a resource allocation request for this policy.
 func (p *podpools) AllocateResources(c cache.Container) error {
-	log.Debug("allocating container %s...", c.PrettyName())
+	log.Info("allocating container %s...", c.PrettyName())
 	// Assign container to correct pool.
 	pod, ok := c.GetPod()
 	if !ok {
@@ -230,6 +259,9 @@ func (p *podpools) ReleaseResources(c cache.Container) error {
 			log.Debug("all containers removed, free pool allocation %s for pod %q", pool.PrettyName(), pod.GetName())
 			p.validatePodCPU(pod, pool)
 			p.freePool(pod, pool)
+			if pool.Def.FillOrder == FillRebalance {
+				pool.isFull = false
+			}
 		}
 	} else {
 		log.Debug("ReleaseResources: pool-less container %s, nothing to release", c.PrettyName())
@@ -249,10 +281,120 @@ func (p *podpools) Rebalance() (bool, error) {
 	return false, nil
 }
 
+func isHeavyGame(pod cache.Pod) bool {
+	if appInfo, ok := pod.GetLabel("appInfo"); ok {
+		strs := strings.Split(appInfo, "-")
+		if strs[0] == "subway" {
+			return true
+		} else if strs[0] == "netease" {
+			return false
+		}
+	}
+	return false
+}
+
+func (p *podpools) loadInterfere(pod cache.Pod) {
+	if appInfo, ok := pod.GetLabel("appInfo"); ok {
+		strs := strings.Split(appInfo, "-")
+		if len(strs) == 5 {
+			if i, err := strconv.ParseFloat(strs[1], 64); err == nil {
+				p.interferes.heavyToHeavy = i
+				log.Info("update heavyToHeavy interfere %f from pod %q", p.interferes.heavyToHeavy, pod.GetName())
+			}
+			if i, err := strconv.ParseFloat(strs[2], 64); err == nil {
+				p.interferes.heavyToLight = i
+				log.Info("update heavyToLight interfere %f from pod %q", p.interferes.heavyToLight, pod.GetName())
+			}
+			if i, err := strconv.ParseFloat(strs[3], 64); err == nil {
+				p.interferes.lightToHeavy = i
+				log.Info("update lightToHeavy interfere %f from pod %q", p.interferes.lightToHeavy, pod.GetName())
+			}
+			if i, err := strconv.ParseFloat(strs[4], 64); err == nil {
+				p.interferes.lightToLight = i
+				log.Info("update lightToLight interfere %f from pod %q", p.interferes.lightToLight, pod.GetName())
+			}
+		}
+	}
+}
+
+func isAndroidPod(pod cache.Pod) bool {
+	if app, ok := pod.GetLabel("app"); ok {
+		return app == "android"
+	}
+	return false
+}
+
+func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
+	curPool := p.allocatedPool(fpsDropPod)
+	log.Info("handling fps drop of pod %q in pod %s[%d] ", fpsDropPod.GetName(), curPool.Def.Name, curPool.Instance)
+
+	fpsData := fpsDropPod.GetFPSData()
+	if value, ok := p.gameThreshold[fpsData.Game]; ok {
+		p.gameThreshold[fpsData.Game] = math.Min(value, fpsData.Schedtime)
+	} else {
+		p.gameThreshold[fpsData.Game] = fpsData.Schedtime
+	}
+	log.Info("Updating the schedule time threshold of game %s : %f", fpsData.Game, p.gameThreshold[fpsData.Game])
+
+	if p.clock.Now().Before(curPool.lastRebalanceTime.Add(time.Second * 2)) {
+		log.Info("the pool %s[%d] is rebalanced within 1s", curPool.Def.Name, curPool.Instance)
+		return nil
+	} else if !fpsDropPod.NeedRebalance() {
+		log.Info("Consecutive fps drop times of the pod %q < FPSDropBoundary %d", fpsDropPod.GetName(), cache.FPSDropBoundary)
+		return nil
+	} else {
+		curPool.lastRebalanceTime = p.clock.Now()
+	}
+
+	var podToMov cache.Pod
+	var value string
+	if isHeavyGame(fpsDropPod) { // heavy game
+		if len(curPool.LightPodIDs) > 0 {
+			// if exists light game, move light one
+			podToMov, _ = p.cch.LookupPod(curPool.LightPodIDs[0])
+			curPool.isFull = true
+		} else {
+			//  else move this game
+			podToMov = fpsDropPod
+		}
+	} else { // light game
+		// move this game
+		podToMov = fpsDropPod
+		curPool.isFull = true
+	}
+
+	// remove the pod from the pool
+	p.freePool(podToMov, curPool)
+
+	// allocate all the containers and the pod
+	for _, c := range podToMov.GetContainers() {
+		if err := p.AllocateResources(c); err != nil {
+
+			// restore pod in curpool
+			podID := podToMov.GetID()
+			curPool.PodIDs[podID] = []string{}
+			for _, container := range podToMov.GetContainers() {
+				p.assignContainer(container, curPool)
+			}
+			if value == "heavy" {
+				curPool.HeavyPodIDs = append(curPool.HeavyPodIDs, podID)
+			} else {
+				curPool.LightPodIDs = append(curPool.LightPodIDs, podID)
+			}
+			log.Error("cannot find a pool to rebalance")
+			return nil
+		}
+	}
+
+	return nil
+}
+
 // HandleEvent handles policy-specific events.
-func (p *podpools) HandleEvent(*events.Policy) (bool, error) {
-	log.Debug("(not) handling event...")
-	return false, nil
+func (p *podpools) HandleEvent(e *events.Policy) (bool, error) {
+	if e.Type == events.ContainerFpsDrop {
+		p.handleFPSDrop(e.Data.(cache.Pod))
+	}
+	return true, nil
 }
 
 // ExportResourceData provides resource data to export for the container.
@@ -274,6 +416,96 @@ func (p *podpools) allocatedPool(pod cache.Pod) *Pool {
 		return nil
 	}
 	return pools[0]
+}
+
+func (p *podpools) capableForGame(pool *Pool, pod *cache.Pod) bool {
+	if pool.isFull {
+		log.Info("FULL: pool %s is capable for podID %q", *pool, (*pod).GetID())
+		return false
+	}
+
+	var iToHeavy float64
+	var iToLight float64
+	var isHeavy = isHeavyGame(*pod)
+	if isHeavy {
+		iToHeavy = p.interferes.heavyToHeavy
+		iToLight = p.interferes.heavyToLight
+	} else {
+		iToHeavy = p.interferes.lightToHeavy
+		iToLight = p.interferes.lightToLight
+	}
+	for _, heavyPodID := range pool.HeavyPodIDs {
+		if heavyPod, found := p.cch.LookupPod(heavyPodID); found {
+			fpsData := heavyPod.GetFPSData()
+			if threshold, exist := p.gameThreshold[fpsData.Game]; exist {
+				fpsData := heavyPod.GetFPSData()
+				if fpsData.Schedtime+iToHeavy < threshold {
+					continue
+				} else {
+					if !isHeavy {
+						pool.isFull = true
+						log.Info("pool %s is set to be FULL", *pool)
+					}
+					log.Info("pool %s is not full, but not capable for podID %q for heavyPod %q not tolerating",
+						*pool, (*pod).GetID(), heavyPodID)
+					return false
+				}
+			}
+		} else {
+			log.Error("cannot find pod with podID %q", (*pod).GetID())
+		}
+	}
+
+	for _, lightPodID := range pool.LightPodIDs {
+		if lightPod, found := p.cch.LookupPod(lightPodID); found {
+			fpsData := lightPod.GetFPSData()
+			if threshold, exist := p.gameThreshold[fpsData.Game]; exist {
+				if fpsData.Schedtime+iToLight < threshold {
+					continue
+				} else {
+					if !isHeavy {
+						pool.isFull = true
+						log.Info("pool %s is set to be FULL", *pool)
+					}
+					log.Info("pool %s is not full, but not capable for podID %q for lightPod %q not tolerating",
+						*pool, (*pod).GetID(), lightPodID)
+					return false
+				}
+			}
+		} else {
+			log.Error("cannot find pod with podID %q", (*pod).GetID())
+		}
+	}
+	log.Info("pool %s is capable for podID %q", (*pod).GetID())
+	return true
+}
+
+func (p *podpools) calculateLightToMove(pool *Pool) int {
+	lightPodToMov := 0.0
+	interferes := p.interferes
+	for _, heavyPodId := range pool.HeavyPodIDs {
+		if heavyPod, ok := p.cch.LookupPod(heavyPodId); ok {
+			fpsData := heavyPod.GetFPSData()
+			if threshold, tok := p.gameThreshold[fpsData.Game]; tok {
+				lights := math.Ceil(
+					(fpsData.Schedtime + interferes.heavyToHeavy - threshold) /
+						interferes.lightToHeavy)
+				lightPodToMov = math.Max(lightPodToMov, lights)
+			}
+		}
+	}
+	for _, lightPodId := range pool.LightPodIDs {
+		if lightPod, ok := p.cch.LookupPod(lightPodId); ok {
+			fpsData := lightPod.GetFPSData()
+			if threshold, tok := p.gameThreshold[fpsData.Game]; tok {
+				lights := math.Ceil(
+					(fpsData.Schedtime + interferes.heavyToLight - threshold) /
+						interferes.lightToLight)
+				lightPodToMov = math.Max(lightPodToMov, lights)
+			}
+		}
+	}
+	return int(lightPodToMov)
 }
 
 // allocatePool returns a pool allocated for a pod.
@@ -303,6 +535,117 @@ func (p *podpools) allocatePool(pod cache.Pod) *Pool {
 		})
 	case FillFirstFree:
 		// FirstFree is already the first of the pools list.
+	case FillRebalance:
+		p.loadInterfere(pod)
+		if !isAndroidPod(pod) {
+			log.Info("The pod %q is not android game pod, falling back to %q", pod.GetName(), defaultPoolDefName)
+			pools = []*Pool{p.pools[1]}
+			break
+		}
+		isPoolfound := false
+		for _, pool := range pools {
+			if pool.isFull {
+				log.Info("FULL: pool %s", pool)
+			} else {
+				log.Info("Not full: pool %s", pool)
+			}
+		}
+		if isHeavyGame(pod) {
+			// find capable pools with most heavy games and without light games
+			maxHeavyGames := -1
+			for id, pool := range pools {
+				if len(pool.LightPodIDs) == 0 && p.capableForGame(pool, &pod) &&
+					maxHeavyGames < len(pool.HeavyPodIDs) {
+					pools[0], pools[id] = pools[id], pools[0]
+					maxHeavyGames = len(pool.HeavyPodIDs)
+					isPoolfound = true
+					log.Info("For podID %q: found capable pools with most heavy games and without light games: pool %s",
+						pod.GetID(), pool)
+				}
+			}
+			// find pools capable to insert
+			if !isPoolfound {
+				for id, pool := range pools {
+					if p.capableForGame(pool, &pod) {
+						pools[0], pools[id] = pools[id], pools[0]
+						isPoolfound = true
+						log.Info("For podID %q: found capable pools to insert pool %s",
+							pod.GetID(), pool)
+						break
+					}
+				}
+			}
+			// move light games in the pool that has least heavy games
+			//  to make room to newly inserted game
+			if !isPoolfound {
+				sort.Slice(pools, func(i, j int) bool {
+					return len(pools[i].HeavyPodIDs) < len(pools[j].HeavyPodIDs)
+				})
+				for id, pool := range pools {
+					lightPodToMov := p.calculateLightToMove(pool)
+
+					if lightPodToMov <= len(pool.LightPodIDs) {
+						isPoolfound = true
+						pool.isFull = true
+						log.Info("allocatePool: lightPodToMov exceeds current light pods, pool %s is set to be FULL", *pool)
+
+						for i := lightPodToMov - 1; i >= 0; i = i - 1 {
+							log.Debug("waiting for rebalancing light pod id %q...", pool.LightPodIDs[i])
+							podToMov, _ := p.cch.LookupPod(pool.LightPodIDs[i])
+							p.freePool(podToMov, pool)
+							for _, c := range podToMov.GetContainers() {
+								p.AllocateResources(c)
+							}
+						}
+
+						pools[0], pools[id] = pools[id], pools[0]
+						break
+					}
+				}
+			}
+			if !isPoolfound && len(pools) > 0 {
+				log.Error("cannot find free %q pool for pod %q", poolDef.Name, pod.GetName())
+				return nil
+			}
+			pools[0].HeavyPodIDs = append(pools[0].HeavyPodIDs, pod.GetID())
+		} else {
+			// find capable pool with most light games and without heavy games
+			if !isPoolfound {
+				maxLightGames := -1
+				for id, pool := range pools {
+					if len(pool.HeavyPodIDs) == 0 &&
+						p.capableForGame(pool, &pod) &&
+						len(pool.LightPodIDs) > maxLightGames {
+						isPoolfound = true
+						maxLightGames = len(pool.LightPodIDs)
+						pools[0], pools[id] = pools[id], pools[0]
+						log.Info("For podID %q: found capable pools with most light games and without heavy games: pool %s",
+							pod.GetID(), pool)
+					}
+				}
+			}
+			// find pool with most heavy pod capable to insert
+			if !isPoolfound {
+				sort.Slice(pools, func(i, j int) bool {
+					return len(pools[i].HeavyPodIDs) > len(pools[j].HeavyPodIDs)
+				})
+				for id, pool := range pools {
+					if p.capableForGame(pool, &pod) {
+						pools[0], pools[id] = pools[id], pools[0]
+						isPoolfound = true
+						log.Info("For podID %q: found capable pools with most heavy pod capable to insert: pool %s",
+							pod.GetID(), pool)
+						break
+					}
+				}
+			}
+			if !isPoolfound && len(pools) > 0 {
+				log.Error("cannot find free %q pool for pod %q, falling back to %q", poolDef.Name, pod.GetName(), defaultPoolDefName)
+				return nil
+			}
+			pools[0].LightPodIDs = append(pools[0].LightPodIDs, pod.GetID())
+		}
+
 	}
 	if len(pools) == 0 {
 		log.Error("cannot find free %q pool for pod %q, falling back to %q", poolDef.Name, pod.GetName(), defaultPoolDefName)
@@ -352,6 +695,26 @@ func (p *podpools) freePool(pod cache.Pod, pool *Pool) {
 	podID := pod.GetID()
 	delete(pool.PodIDs, podID)
 	delete(p.podMaxMilliCPU, podID)
+	if pool.Def.FillOrder == FillRebalance && isAndroidPod(pod) {
+		if isHeavyGame(pod) {
+			for ind, id := range pool.HeavyPodIDs {
+				if id == podID {
+					length := len(pool.HeavyPodIDs)
+					pool.HeavyPodIDs[ind] = pool.HeavyPodIDs[length-1]
+					pool.HeavyPodIDs = pool.HeavyPodIDs[:length-1]
+				}
+			}
+		} else {
+			for ind, id := range pool.LightPodIDs {
+				if id == podID {
+					length := len(pool.LightPodIDs)
+					pool.LightPodIDs[ind] = pool.LightPodIDs[length-1]
+					pool.LightPodIDs = pool.LightPodIDs[:length-1]
+				}
+			}
+		}
+	}
+	log.Info("delete pod %s from pool %s[%d] ", pod.GetName(), pool.Def.Name, pool.Instance)
 }
 
 // trackPodCPU keeps track on pod's CPU requests.

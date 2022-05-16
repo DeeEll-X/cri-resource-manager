@@ -25,6 +25,7 @@ import (
 	"github.com/intel/cri-resource-manager/pkg/apis/resmgr"
 	"github.com/intel/cri-resource-manager/pkg/cgroups"
 	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/kubernetes"
+	"github.com/intel/cri-resource-manager/pkg/log"
 )
 
 const (
@@ -501,6 +502,29 @@ func (p *pod) getTasks(recursive, processes bool) ([]string, error) {
 	}
 
 	return pids, nil
+}
+
+func (p *pod) SetFPSData(game string, fps float64, schedtime float64) {
+	p.FpsData.Game = game
+	p.FpsData.Fps = fps
+	p.FpsData.Schedtime = schedtime
+}
+
+func (p *pod) GetFPSData() PodFpsData {
+	return p.FpsData
+}
+
+func (p *pod) SetFPSDropTimes(isFpsDrop bool) {
+	if isFpsDrop {
+		p.ConseDropTimes = p.ConseDropTimes + 1
+		log.Info("pod %q has %d consecutive FPS drops", p.GetName(), p.ConseDropTimes)
+	} else {
+		p.ConseDropTimes = 0
+	}
+}
+
+func (p* pod) NeedRebalance() bool {
+	return p.ConseDropTimes >= FPSDropBoundary
 }
 
 // ParsePodStatus parses a PodSandboxStatusResponse into a PodStatus.

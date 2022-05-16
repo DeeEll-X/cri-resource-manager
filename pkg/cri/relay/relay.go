@@ -21,6 +21,7 @@ import (
 
 	"github.com/intel/cri-resource-manager/pkg/cri/client"
 	"github.com/intel/cri-resource-manager/pkg/cri/server"
+	"github.com/intel/cri-resource-manager/pkg/cri/fpsserver"
 	logger "github.com/intel/cri-resource-manager/pkg/log"
 )
 
@@ -37,6 +38,8 @@ type Options struct {
 	ImageSocket string
 	// RuntimeSocket is the socket path for the (real) CRI runtime services.
 	RuntimeSocket string
+	// FPSSocket is the socket path for the (real) CRI FPS services.
+	FPSSocket string
 	// QualifyReqFn produces context for disambiguating a CRI request/reply.
 	QualifyReqFn func(interface{}) string
 }
@@ -53,6 +56,8 @@ type Relay interface {
 	Client() client.Client
 	// Server returns the relays server interface.
 	Server() server.Server
+
+	FPSServer() fpsserver.Server
 }
 
 // relay is the implementation of Relay.
@@ -62,6 +67,7 @@ type relay struct {
 	options    Options       // relay options
 	client     client.Client // relay CRI client
 	server     server.Server // relay CRI server
+	fpsserver  fpsserver.Server // FPS server
 }
 
 // NewRelay creates a new relay instance.
@@ -90,6 +96,16 @@ func NewRelay(options Options) (Relay, error) {
 		QualifyReqFn: r.options.QualifyReqFn,
 	}
 	if r.server, err = server.NewServer(srvopts); err != nil {
+		return nil, relayError("failed to create relay server: %v", err)
+	}
+
+	fpssrvopts := fpsserver.Options{
+		Socket:		r.options.FPSSocket,
+		User:		-1,
+		Group:		-1,
+		Mode:		0660,
+	}
+	if r.fpsserver, err = fpsserver.NewServer(fpssrvopts); err != nil {
 		return nil, relayError("failed to create relay server: %v", err)
 	}
 
@@ -123,6 +139,12 @@ func (r *relay) Start() error {
 		return relayError("failed to start relay: %v", err)
 	}
 
+	if r.options.FPSSocket != DisableService {
+		if err := r.fpsserver.Start(); err != nil {
+			return relayError("failed to start relay: %v", err)
+		}
+	}
+
 	return nil
 }
 
@@ -130,6 +152,7 @@ func (r *relay) Start() error {
 func (r *relay) Stop() {
 	r.client.Close()
 	r.server.Stop()
+	r.fpsserver.Stop()
 }
 
 // Client returns the relays Client interface.
@@ -140,6 +163,10 @@ func (r *relay) Client() client.Client {
 // Server returns the relays Server interface.
 func (r *relay) Server() server.Server {
 	return r.server
+}
+
+func (r *relay) FPSServer() fpsserver.Server {
+	return r.fpsserver
 }
 
 func (r *relay) dialNotify(socket string, uid int, gid int, mode os.FileMode, err error) {

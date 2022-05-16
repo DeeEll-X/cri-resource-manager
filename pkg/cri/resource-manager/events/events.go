@@ -39,4 +39,5 @@ type Policy struct {
 const (
 	// ContainerStarted is delivered to policies when a StartContainer request succeeds.
 	ContainerStarted = "container-started"
+	ContainerFpsDrop = "container-fps-drop"
 )

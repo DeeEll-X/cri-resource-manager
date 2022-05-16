@@ -171,6 +171,26 @@ type Pod interface {
 	// GetTasks returns the pids of all threads in the pod either excluding cotnainer
 	// processes, if called with false, or including those if called with true.
 	GetTasks(bool) ([]string, error)
+	
+	// SetFpsData set the fps data of a pod
+	SetFPSData(game string,fps float64,scheduletime float64)
+	// GetFPSData returns the game fps related data
+	GetFPSData() PodFpsData
+
+	// SetFPSDropTimes set the consecutive fps times
+	SetFPSDropTimes(isFpsDrop bool)
+	// NeedRebalance returns true if the instance have consecutive FPS drops
+	NeedRebalance()	bool
+}
+
+const (
+	FPSDropBoundary int = 2
+)
+// pod fps data
+type PodFpsData struct {
+	Game			string						// game of the pod
+	Fps				float64						// latest fps
+	Schedtime		float64						// latest schedule time
 }
 
 // A cached pod.
@@ -189,6 +209,9 @@ type pod struct {
 
 	Resources *PodResourceRequirements // annotated resource requirements
 	Affinity  *podContainerAffinity    // annotated container affinity
+
+	FpsData		PodFpsData
+	ConseDropTimes	int				// consecutive fps drop times
 }
 
 // ContainerState is the container state in the runtime.
@@ -523,6 +546,8 @@ type Cache interface {
 	DeletePod(id string) Pod
 	// LookupPod looks up a pod in the cache.
 	LookupPod(id string) (Pod, bool)
+	// LookupPodByName looks up a pod in the
+	LookupPodByName(name string) (Pod, bool)
 	// InsertContainer inserts a container into the cache, using a runtime request or reply.
 	InsertContainer(msg interface{}) (Container, error)
 	// UpdateContainerID updates a containers runtime id.
@@ -898,6 +923,15 @@ func (cch *cache) DeletePod(id string) Pod {
 func (cch *cache) LookupPod(id string) (Pod, bool) {
 	p, ok := cch.Pods[id]
 	return p, ok
+}
+
+func (cch *cache) LookupPodByName(name string) (Pod, bool) {
+	for _, pod := range cch.Pods {
+		if pod.Name == name {
+			return pod ,true
+		}
+	}
+	return nil ,false
 }
 
 // Insert a container into the cache.

@@ -16,12 +16,19 @@ package podpools
 
 import (
 	"fmt"
+	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
+	"time"
 
+	cri "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
 	"k8s.io/kubernetes/pkg/kubelet/cm/cpuset"
 
 	"github.com/intel/cri-resource-manager/pkg/cpuallocator"
+	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/cache"
+	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/events"
+	"github.com/intel/cri-resource-manager/pkg/cri/resource-manager/policy"
 )
 
 func validateError(t *testing.T, expectedError string, err error) bool {
@@ -577,4 +584,191 @@ func TestParseInstancesCPUs(t *testing.T) {
 			}
 		})
 	}
+}
+
+func createPodAndContainer(cch cache.Cache, id string, poolDefName string, 
+		gameName string) (cache.Pod,cache.Container)  {
+	runPodSandboxRequest := cri.RunPodSandboxRequest{
+		Config: &cri.PodSandboxConfig{
+			Metadata: &cri.PodSandboxMetadata{ 
+				Name: "android-"+gameName+"-"+id,
+				Uid: id,
+			},
+			Labels: map[string]string{
+				"app" : "android",
+				"appInfo": gameName,
+			},
+			Annotations: map[string]string{
+			 		podpoolKey+"/pod":poolDefName},
+		},
+	}
+	pod := cch.InsertPod(id, &runPodSandboxRequest , nil)
+	createContainerRequest := cri.CreateContainerRequest{
+		PodSandboxId: id,
+		Config: &cri.ContainerConfig{
+			Metadata: &cri.ContainerMetadata{
+				Name: "container"+id,
+			},
+		},
+		SandboxConfig: &cri.PodSandboxConfig{
+			Metadata: &cri.PodSandboxMetadata{
+				Name: "test-"+gameName+"-"+id,
+				Uid: id,
+			},
+		},
+	}
+	container, _ := cch.InsertContainer(&createContainerRequest)
+	return pod, container
+}
+func TestFillRebalance(t *testing.T) {
+	log.EnableDebug(true)
+	
+	reservedCpus1 := cpuset.CPUSet{}
+	reservedPoolDef := PoolDef{
+		Name: reservedPoolDefName,
+	}
+	defaultPoolDef := PoolDef{
+		Name: defaultPoolDefName,
+	}
+	poolDef := PoolDef{
+		Name:      "dualcpu",
+		CPU:       "2",
+		Instances: "6 CPUs",
+		FillOrder: FillRebalance,
+	}
+	podpoolsOptions := PodpoolsOptions {
+		PinCPU: true,
+		PinMemory: true,
+		PoolDefs: []*PoolDef{&poolDef},
+	}
+
+	cacheDir, _ := ioutil.TempDir("", "")
+	defer os.RemoveAll(cacheDir)
+	cch,_ := cache.NewCache(cache.Options{ CacheDir: cacheDir})
+
+
+	p := &podpools{
+		options: &policy.BackendOptions{
+			System: &mockSystem{},
+		},
+		cch: cch,
+		cpuAllocator: &mockCpuAllocator{},
+		allowed: cpuset.NewCPUSet(0,1,2,3,4,5),
+		reserved: reservedCpus1,
+		reservedPoolDef: &reservedPoolDef,
+		defaultPoolDef: &defaultPoolDef,
+		podMaxMilliCPU: make(map[string]int64),
+		gameThreshold: make(map[string]float64),
+		interferes: gameInterfere{
+			heavyToHeavy: 3,
+			heavyToLight: 2,
+			lightToHeavy: 1,
+			lightToLight: 1,
+		},
+		clock: &mockClock{
+			time.Now().Add(2*time.Second),
+		},
+	}
+	p.setConfig(&podpoolsOptions)
+
+	// threshold A = 20.5, threshold B = 20.5
+	// 1 pool = at most 2 heavy(15+3+1+1) + 2 light(15+2+2+1) = at most 6 light 
+	// in pool 0 = 2 heavy
+	heavyPod1,heavyContainer1:= createPodAndContainer(cch, "h1", "dualcpu", "stackball2")
+	p.AllocateResources(heavyContainer1)
+	heavyPod2,heavyContainer2 := createPodAndContainer(cch, "h2", "dualcpu", "stackball2")
+	p.AllocateResources(heavyContainer2)
+
+	heavyPod1.SetFPSData("stackball2", 60, 18)
+	heavyPod2.SetFPSData("stackball2", 60, 18)
+
+	// in pool 1 = 2 light
+	lightPod1,lightContainer1 := createPodAndContainer(cch,"l1","dualcpu","subway2")
+	p.AllocateResources(lightContainer1)
+	lightPod2,lightContainer2 := createPodAndContainer(cch, "l2", "dualcpu","subway2")
+	p.AllocateResources(lightContainer2)
+	 
+	lightPod1.SetFPSData("subway2",60, 16)
+	lightPod2.SetFPSData("subway2",60, 16)
+
+	// insert to pool 0, but rebalance to pool 2
+	// pool 2 = 1 heavy
+	heavyPod3 ,heavyContainer3 := createPodAndContainer(cch, "h3", "dualcpu","stackball2")
+	p.AllocateResources(heavyContainer3)
+	heavyPod3.SetFPSData("stackball2", 40, 21)
+	e1 := &events.Policy{
+		Type:   events.ContainerFpsDrop,
+		Source: "podpools-policy_test",
+		Data:   heavyPod3,
+	}
+	p.HandleEvent(e1);
+	heavyPod3.SetFPSData("stackball2", 40, 15)
+
+	// insert to pool 1
+	// pool1 = 6 light
+	lightPod3,lightContainer3 := createPodAndContainer(cch, "l3", "dualcpu", "subway2")
+	p.AllocateResources(lightContainer3)
+	lightPod4,lightContainer4 := createPodAndContainer(cch, "l4", "dualcpu","subway2")
+	p.AllocateResources(lightContainer4)
+	lightPod5,lightContainer5 := createPodAndContainer(cch, "l5", "dualcpu","subway2")
+	p.AllocateResources(lightContainer5)
+	lightPod6,lightContainer6 := createPodAndContainer(cch, "l6", "dualcpu","subway2")
+	p.AllocateResources(lightContainer6)
+
+	lightPod1.SetFPSData("subway2",60, 20)
+	lightPod2.SetFPSData("subway2",60, 20)
+	lightPod3.SetFPSData("subway2",60, 20)
+	lightPod4.SetFPSData("subway2",60, 20)
+	lightPod5.SetFPSData("subway2",60, 20)
+	lightPod6.SetFPSData("subway2",60, 20)
+
+	// insert to pool 2 (calculate capacity)
+	// pool 0 = 2 heavy + 1 light
+	lightPod7,lightContainer7 := createPodAndContainer(cch, "l7", "dualcpu","subway2")
+	p.AllocateResources(lightContainer7)
+	lightPod7.SetFPSData("subway2",40, 21)
+	e2 := &events.Policy{
+		Type:   events.ContainerFpsDrop,
+		Source: "podpools-policy_test",
+		Data:   lightPod7,
+	}
+	p.HandleEvent(e2);
+	heavyPod2.SetFPSData("stackball2", 60, 19)
+	heavyPod1.SetFPSData("stackball2", 60, 19)
+	lightPod7.SetFPSData("subway2",60,19)
+
+
+	// pool 0 = 2 heavy + 2 light
+	lightPod8, lightContainer8 := createPodAndContainer(cch, "l8", "dualcpu","subway2")
+	p.AllocateResources(lightContainer8)
+	heavyPod1.SetFPSData("stackball2", 60, 20)
+	heavyPod2.SetFPSData("stackball2", 60, 20)
+	lightPod7.SetFPSData("subway2", 60, 20)
+	lightPod8.SetFPSData("subway2", 60, 20)
+
+	// pool 2 = 1 heavy + 1 light
+	lightPod9, lightContainer9 := createPodAndContainer(cch, "l9", "dualcpu","subway2")
+	p.AllocateResources(lightContainer9)
+	heavyPod3.SetFPSData("stackball2", 60, 16)
+	lightPod9.SetFPSData("subway2", 60, 17)
+
+	// pool 1 = 4 light
+	p.ReleaseResources(lightContainer1)
+	p.ReleaseResources(lightContainer2)
+	lightPod3.SetFPSData("subway2",60, 18)
+	lightPod4.SetFPSData("subway2",60, 18)
+	lightPod5.SetFPSData("subway2",60, 18)
+	lightPod6.SetFPSData("subway2",60, 18)
+
+	// pool1 = 4 light + 1 heavy
+	heavyPod4 ,heavyContainer4 := createPodAndContainer(cch, "h4", "dualcpu","stackball2")
+	p.AllocateResources(heavyContainer4)
+	heavyPod4.SetFPSData("stackball2",60,19)
+
+	// insert to pool 
+	_,heavyContainer5 := createPodAndContainer(cch, "h5", "dualcpu","stackball2")
+	p.AllocateResources(heavyContainer5)
+	// pool0: 2h + 2l
+	// pool1: 1h + 4l
+	// pool2: 2h + 1l
 }
