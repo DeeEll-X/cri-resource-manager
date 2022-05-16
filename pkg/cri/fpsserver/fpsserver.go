@@ -171,17 +171,33 @@ func (s *server) HandleServerConn(c net.Conn) {
 }
 
 func (s *server) parseMsg(buf []byte) []FpsData {
+	var start int
+	var end	int
 	var msg fpsDataMsg
 	var fpsDatas []FpsData
-	if err := json.Unmarshal(buf, &msg); err != nil {
-		panic(err)
-	}
-	if msg.IsValid() {
-		data := msg.convertToFpsData()
-		s.Info("%#v", data)
-		fpsDatas = append(fpsDatas, data)
-	} else {
-		log.Info("Msessage is invalid")
+	length := len(buf)
+
+	for start = 0;start <length;{
+		if buf[start] != '{' {
+			start = start + 1
+			continue
+		} 
+		for end = start; end<length; end = end + 1{
+			if buf[end] == '}'{
+				break
+			}
+		}
+		if err := json.Unmarshal(buf[start:end+1], &msg); err != nil {
+			panic(err)
+		}
+		if msg.IsValid() {
+			data := msg.convertToFpsData()
+			s.Info("%#v", data)
+			fpsDatas = append(fpsDatas, data)
+		} else {
+			log.Info("Message is invalid")
+		}
+		start = end + 1
 	}
 	return fpsDatas
 }
