@@ -100,6 +100,7 @@ type server struct {
 	listener       net.Listener // socket our gRPC server listens on
 	options        Options      // server options
 	fpsDropHandler *FPSDropHandler
+	firstValidFPSDataTime map[string]time.Time
 }
 
 // NewServer creates a new server instance.
@@ -112,6 +113,7 @@ func NewServer(options Options) (Server, error) {
 	s := &server{
 		Logger:  logger.NewLogger("cri/fpsserver"),
 		options: options,
+		firstValidFPSDataTime: make(map[string]time.Time),
 	}
 
 	return s, nil
@@ -222,7 +224,19 @@ func (rd *fpsDataMsg) convertToFpsData() FpsData {
 
 func (s *server) handlefpsDataMsg(fpsDatas []FpsData) {
 	for _, data := range fpsDatas {
-		(*s.fpsDropHandler).RecordFPSData(data)
+		if timeStamp, ok := s.firstValidFPSDataTime[data.PodName]; ok {
+			// start handle FPS data 1 minute after the first valid FPS message
+			if data.MicroTimeStamp.After(timeStamp.Add(time.Minute)){
+				s.Debug("Call fpsDropHandler.RecordFPSData")
+				(*s.fpsDropHandler).RecordFPSData(data)
+			} else {
+				s.Info("FPS data is ignored if it is within 1 minute from the first valid FPS message")
+			}
+		} else {
+			s.firstValidFPSDataTime[data.PodName] = data.MicroTimeStamp
+			s.Info("Update the timestamp %s of first valid FPS msg of Pod %s", 
+				s.firstValidFPSDataTime[data.PodName], data.PodName)
+		}
 	}
 }
 

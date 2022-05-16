@@ -334,9 +334,13 @@ func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 	} else {
 		p.gameThreshold[fpsData.Game] = fpsData.Schedtime
 	}
+	log.Info("Updating the schedule time threshold of game %s : %f", fpsData.Game, p.gameThreshold[fpsData.Game])
 
 	if p.clock.Now().Before(curPool.lastRebalanceTime.Add(time.Second * 2)) {
 		log.Info("the pool %s[%d] is rebalanced within 1s", curPool.Def.Name, curPool.Instance)
+		return nil
+	} else if !fpsDropPod.NeedRebalance() {
+		log.Info("Consecutive fps drop times of the pod %q < FPSDropBoundary %d", fpsDropPod.GetName(), cache.FPSDropBoundary)
 		return nil
 	} else {
 		curPool.lastRebalanceTime = p.clock.Now()
@@ -416,7 +420,7 @@ func (p *podpools) allocatedPool(pod cache.Pod) *Pool {
 
 func (p *podpools) capableForGame(pool *Pool, pod *cache.Pod) bool {
 	if pool.isFull {
-		log.Info("FULL: pool %s is capable for podID %q", (*pod).GetID())
+		log.Info("FULL: pool %s is capable for podID %q", *pool, (*pod).GetID())
 		return false
 	}
 

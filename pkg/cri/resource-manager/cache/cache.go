@@ -176,8 +176,16 @@ type Pod interface {
 	SetFPSData(game string,fps float64,scheduletime float64)
 	// GetFPSData returns the game fps related data
 	GetFPSData() PodFpsData
+
+	// SetFPSDropTimes set the consecutive fps times
+	SetFPSDropTimes(isFpsDrop bool)
+	// NeedRebalance returns true if the instance have consecutive FPS drops
+	NeedRebalance()	bool
 }
 
+const (
+	FPSDropBoundary int = 2
+)
 // pod fps data
 type PodFpsData struct {
 	Game			string						// game of the pod
@@ -203,6 +211,7 @@ type pod struct {
 	Affinity  *podContainerAffinity    // annotated container affinity
 
 	FpsData		PodFpsData
+	ConseDropTimes	int				// consecutive fps drop times
 }
 
 // ContainerState is the container state in the runtime.

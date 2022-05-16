@@ -904,6 +904,7 @@ func (m *resmgr) RecordFPSData(data fpsserver.FpsData) error{
 
 	if pod, ok := m.cache.LookupPodByName(data.PodName); ok {
 		pod.SetFPSData(data.Game, data.Fps, data.TotalRunnable+data.TotalRunning)
+		pod.SetFPSDropTimes(data.IsFpsDrop)
 		if data.IsFpsDrop {
 			e := &events.Policy{
 				Type:   events.ContainerFpsDrop,
@@ -913,10 +914,13 @@ func (m *resmgr) RecordFPSData(data fpsserver.FpsData) error{
 			if _, err := m.policy.HandleEvent(e); err != nil {
 				m.Error("policy failed to handle event %s: %v", e.Type, err)
 			}
-			log.Info("call runpostupdatehooks to update cpuset")
-			if err := m.runPostUpdateHooks(context.Background(), "pinCpuMem"); err != nil {
-				m.Error("failed to run post-update hooks after recording fps data: %v", err)
-				return resmgrError("failed to run post-update hooks after recording fps data: %v", err)
+			if pod.NeedRebalance(){
+				log.Info("call runpostupdatehooks to update cpuset")
+				if err := m.runPostUpdateHooks(context.Background(), "pinCpuMem"); err != nil {
+					m.Error("failed to run post-update hooks after recording fps data: %v", err)
+					return resmgrError("failed to run post-update hooks after recording fps data: %v", err)
+				}
+				pod.SetFPSDropTimes(false)
 			}
 		}
 	} else {

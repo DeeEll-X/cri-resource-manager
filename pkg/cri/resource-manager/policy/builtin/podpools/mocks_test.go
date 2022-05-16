@@ -653,6 +653,12 @@ func (m *mockPod) SetFPSData(string,float64, float64) {
 func (m *mockPod) GetFPSData() cache.PodFpsData {
 	panic("unimplemented")
 }
+func (m *mockPod) SetFPSDropTimes(isFpsDrop bool) {
+	panic("unimplemented")
+}
+func (m* mockPod) NeedRebalance() bool {
+	panic("unimplemented")
+}
 type mockCache struct {
 	returnValueForGetPolicyEntry   bool
 	returnValue1ForLookupContainer cache.Container
