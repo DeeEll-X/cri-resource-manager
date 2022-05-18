@@ -903,9 +903,12 @@ func (m *resmgr) RecordFPSData(data fpsserver.FpsData) error{
 	defer m.Unlock()
 
 	if pod, ok := m.cache.LookupPodByName(data.PodName); ok {
-		pod.SetFPSData(data.Game, data.Fps, data.TotalRunnable+data.TotalRunning)
-		pod.SetFPSDropTimes(data.IsFpsDrop)
-		if data.IsFpsDrop {
+		if !pod.IsInstantFPSData() {
+			log.Info("The pod triggered rebalance. This FPS data is outdated.")
+			return nil
+		}
+		pod.SetFPSData(data.Game, data.Fps, data.TotalRunnable+data.TotalRunning, data.IsFpsDrop)
+		if pod.NeedRebalance() {
 			e := &events.Policy{
 				Type:   events.ContainerFpsDrop,
 				Source: "fpsserver",
@@ -914,14 +917,12 @@ func (m *resmgr) RecordFPSData(data fpsserver.FpsData) error{
 			if _, err := m.policy.HandleEvent(e); err != nil {
 				m.Error("policy failed to handle event %s: %v", e.Type, err)
 			}
-			if pod.NeedRebalance(){
-				log.Info("call runpostupdatehooks to update cpuset")
-				if err := m.runPostUpdateHooks(context.Background(), "pinCpuMem"); err != nil {
-					m.Error("failed to run post-update hooks after recording fps data: %v", err)
-					return resmgrError("failed to run post-update hooks after recording fps data: %v", err)
-				}
-				pod.SetFPSDropTimes(false)
+			log.Info("call runpostupdatehooks to update cpuset")
+			if err := m.runPostUpdateHooks(context.Background(), "pinCpuMem"); err != nil {
+				m.Error("failed to run post-update hooks after recording fps data: %v", err)
+				return resmgrError("failed to run post-update hooks after recording fps data: %v", err)
 			}
+			pod.UpdateLastRebalanceTime()
 		}
 	} else {
 		m.Warn("failed to look up pod %s, fail to record fps data", data.PodName)

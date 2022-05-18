@@ -284,9 +284,9 @@ func (p *podpools) Rebalance() (bool, error) {
 func isHeavyGame(pod cache.Pod) bool {
 	if appInfo, ok := pod.GetLabel("appInfo"); ok {
 		strs := strings.Split(appInfo, "-")
-		if strs[0] == "subway" {
+		if strs[0] == "subway" || strs[0] == "riptide" {
 			return false
-		} else if strs[0] == "netease" {
+		} else if strs[0] == "netease" || strs[0] == "stackball" {
 			return true
 		}
 	}
@@ -324,27 +324,31 @@ func isAndroidPod(pod cache.Pod) bool {
 	return false
 }
 
+func(p *podpools) updateGameThreshold(fpsData cache.PodFpsData){
+	var schedtimeSum float64 = 0
+	for _,schedtime := range fpsData.ConseDropData {
+		schedtimeSum += schedtime
+	}
+	if value, ok := p.gameThreshold[fpsData.Game]; ok {
+		p.gameThreshold[fpsData.Game] = math.Min(value, schedtimeSum / (float64)(cache.FPSDropBoundary))
+	} else {
+		p.gameThreshold[fpsData.Game] = schedtimeSum / (float64)(cache.FPSDropBoundary)
+	}
+	log.Info("Updating the schedule time threshold of game %s : %f", fpsData.Game, p.gameThreshold[fpsData.Game])
+}
+
 func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 	curPool := p.allocatedPool(fpsDropPod)
 
 	fpsData := fpsDropPod.GetFPSData()
-	if value, ok := p.gameThreshold[fpsData.Game]; ok {
-		p.gameThreshold[fpsData.Game] = math.Min(value, fpsData.Schedtime)
-	} else {
-		p.gameThreshold[fpsData.Game] = fpsData.Schedtime
-	}
-	log.Info("Updating the schedule time threshold of game %s : %f", fpsData.Game, p.gameThreshold[fpsData.Game])
+	p.updateGameThreshold(fpsData)
 
 	if p.clock.Now().Before(curPool.lastRebalanceTime.Add(time.Second * 2)) {
 		log.Info("the pool %s[%d] is rebalanced within 1s", curPool.Def.Name, curPool.Instance)
 		return nil
-	} else if !fpsDropPod.NeedRebalance() {
-		log.Info("Consecutive fps drop times of the pod %q < FPSDropBoundary %d", fpsDropPod.GetName(), cache.FPSDropBoundary)
-		return nil
 	} else {
 		curPool.lastRebalanceTime = p.clock.Now()
 		log.Info("handling fps drop of pod %q in pool %s[%d] ", fpsDropPod.GetName(), curPool.Def.Name, curPool.Instance)
-
 	}
 
 	var podToMov cache.Pod
@@ -354,6 +358,7 @@ func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 			// if exists light game, move light one
 			podToMov, _ = p.cch.LookupPod(curPool.LightPodIDs[0])
 			curPool.isFull = true
+			log.Info("pool %s is set to be FULL", curPool)
 		} else {
 			//  else move this game
 			podToMov = fpsDropPod
@@ -362,6 +367,7 @@ func (p *podpools) handleFPSDrop(fpsDropPod cache.Pod) error {
 		// move this game
 		podToMov = fpsDropPod
 		curPool.isFull = true
+			log.Info("pool %s is set to be FULL", curPool)
 	}
 
 	// remove the pod from the pool
@@ -1093,7 +1099,7 @@ func (p *podpools) dismissContainer(c cache.Container, pool *Pool) {
 // pinCpuMem pins container to CPUs and memory nodes if flagged
 func (p *podpools) pinCpuMem(c cache.Container, cpus cpuset.CPUSet, mems idset.IDSet) {
 	if p.ppoptions.PinCPU {
-		log.Debug("  - pinning to cpuset: %s", cpus)
+		log.Info("  - pinning to cpuset: %s", cpus)
 		c.SetCpusetCpus(cpus.String())
 		if reqCpu, ok := c.GetResourceRequirements().Requests[corev1.ResourceCPU]; ok {
 			mCpu := int(reqCpu.MilliValue())

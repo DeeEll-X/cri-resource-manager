@@ -18,6 +18,7 @@ import (
 	"encoding/json"
 	"strconv"
 	"strings"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	cri "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
@@ -504,29 +505,36 @@ func (p *pod) getTasks(recursive, processes bool) ([]string, error) {
 	return pids, nil
 }
 
-func (p *pod) SetFPSData(game string, fps float64, schedtime float64) {
+func (p *pod) SetFPSData(game string, fps float64, schedtime float64, isFPSDrop bool) {
 	p.FpsData.Game = game
 	p.FpsData.Fps = fps
 	p.FpsData.Schedtime = schedtime
+	if isFPSDrop {
+		p.FpsData.ConseDropData[p.FpsData.ConseDropTimes % FPSDropBoundary] = p.FpsData.Schedtime
+		p.FpsData.ConseDropTimes = p.FpsData.ConseDropTimes + 1
+		log.Info("pod %q has %d consecutive FPS drops", p.GetName(), p.FpsData.ConseDropTimes)
+	} else {
+		p.FpsData.ConseDropTimes = 0
+	}
 }
 
 func (p *pod) GetFPSData() PodFpsData {
 	return p.FpsData
 }
 
-func (p *pod) SetFPSDropTimes(isFpsDrop bool) {
-	if isFpsDrop {
-		p.ConseDropTimes = p.ConseDropTimes + 1
-		log.Info("pod %q has %d consecutive FPS drops", p.GetName(), p.ConseDropTimes)
-	} else {
-		p.ConseDropTimes = 0
-	}
-}
-
 func (p* pod) NeedRebalance() bool {
-	return p.ConseDropTimes >= FPSDropBoundary
+	return p.FpsData.ConseDropTimes >= FPSDropBoundary
 }
 
+func (p* pod) IsInstantFPSData() bool {
+	return time.Now().After(p.FpsData.lastRebalanceTimeStamp.Add(PodRebalanceInterval)) 
+}
+
+func (p* pod) UpdateLastRebalanceTime() {
+	p.FpsData.lastRebalanceTimeStamp = time.Now()
+	p.FpsData.ConseDropTimes = 0
+}
+ 
 // ParsePodStatus parses a PodSandboxStatusResponse into a PodStatus.
 func ParsePodStatus(response *cri.PodSandboxStatusResponse) (*PodStatus, error) {
 	var name string

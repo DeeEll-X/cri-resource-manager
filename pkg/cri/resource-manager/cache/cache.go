@@ -24,6 +24,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	v1 "k8s.io/api/core/v1"
 	cri "k8s.io/cri-api/pkg/apis/runtime/v1alpha2"
@@ -171,26 +172,33 @@ type Pod interface {
 	// GetTasks returns the pids of all threads in the pod either excluding cotnainer
 	// processes, if called with false, or including those if called with true.
 	GetTasks(bool) ([]string, error)
-	
+
 	// SetFpsData set the fps data of a pod
-	SetFPSData(game string,fps float64,scheduletime float64)
+	SetFPSData(game string, fps float64, scheduletime float64, isFpsDrop bool)
 	// GetFPSData returns the game fps related data
 	GetFPSData() PodFpsData
 
-	// SetFPSDropTimes set the consecutive fps times
-	SetFPSDropTimes(isFpsDrop bool)
 	// NeedRebalance returns true if the instance have consecutive FPS drops
-	NeedRebalance()	bool
+	NeedRebalance() bool
+	// IsInstantFPSData returns true if the FPS data is sent after the pod triggers rebalance
+	IsInstantFPSData() bool
+	// UpdateLastRebalanceTime update the last rebalance timestamp
+	UpdateLastRebalanceTime()
 }
 
 const (
-	FPSDropBoundary int = 2
+	FPSDropBoundary int = 3
+	PodRebalanceInterval time.Duration = time.Second*2
 )
+
 // pod fps data
 type PodFpsData struct {
-	Game			string						// game of the pod
-	Fps				float64						// latest fps
-	Schedtime		float64						// latest schedule time
+	Game      string  // game of the pod
+	Fps       float64 // latest fps
+	Schedtime float64 // latest schedule time
+	ConseDropData		   [FPSDropBoundary]float64
+	ConseDropTimes         int // consecutive fps drop times
+	lastRebalanceTimeStamp time.Time
 }
 
 // A cached pod.
@@ -210,8 +218,7 @@ type pod struct {
 	Resources *PodResourceRequirements // annotated resource requirements
 	Affinity  *podContainerAffinity    // annotated container affinity
 
-	FpsData		PodFpsData
-	ConseDropTimes	int				// consecutive fps drop times
+	FpsData                PodFpsData
 }
 
 // ContainerState is the container state in the runtime.
@@ -928,10 +935,10 @@ func (cch *cache) LookupPod(id string) (Pod, bool) {
 func (cch *cache) LookupPodByName(name string) (Pod, bool) {
 	for _, pod := range cch.Pods {
 		if pod.Name == name {
-			return pod ,true
+			return pod, true
 		}
 	}
-	return nil ,false
+	return nil, false
 }
 
 // Insert a container into the cache.
